@@ -119,6 +119,19 @@ Third-party analyzer plugins require an exact trust allowlist and execute in-pro
 
 See docs/runtime-monitoring.md, docs/security-hardening.md, docs/architecture.md, and docs/plugins.md.
 
+
+## Phase 6: controlled real-project benchmark
+
+Run the adversarial multi-project corpus and its explicit expected-result checks:
+
+    python -m benchmarks.run
+
+The corpus covers a multi-module Python API, Android/CI permissions, direct and indirect
+dependencies, synthetic credentials, unsafe data flows, generated files, parse failures,
+and a safe stubbed runtime probe. Results report expected-positive coverage and known gaps;
+they do not claim precision or production security certification. See
+[benchmarks/README.md](benchmarks/README.md).
+
 ## License
 
 MIT. See LICENSE.
