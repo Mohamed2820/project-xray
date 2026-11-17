@@ -1,15 +1,15 @@
 """Bounded Python runtime event collection without argument or local-value capture."""
 from __future__ import annotations
 
-import json
 import os
 import sys
 import threading
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from types import FrameType
-from typing import Any, Callable
+from typing import Any
 
 RUNTIME_AUDIT_EVENTS = {
     "subprocess.Popen": "process",
