@@ -24,34 +24,24 @@ The bundled semantic analyzer currently supports Python. Other recognized source
 - Python 3.11+
 - Development install:
 
-\`\`\`bash
-python -m pip install -e ".[dev]"
-\`\`\`
+    python -m pip install -e ".[dev]"
 
 - Security tooling:
 
-\`\`\`bash
-python -m pip install -e ".[dev,security]"
-bandit -r src -ll
-pip-audit
-\`\`\`
+    python -m pip install -e ".[dev,security]"
+    bandit -r src -ll
+    pip-audit
 
 ## CLI
 
 Write a JSON report outside the scanned project:
 
-\`\`\`bash
-xray scan ./path/to/project --output ../project-report.json
-\`\`\`
+    xray scan ./path/to/project --output ../project-report.json
 
 Save an additional SQLite history snapshot outside the scanned project:
 
-\`\`\`bash
-xray scan ./path/to/project \\
-  --output ../project-report.json \\
-  --database ../xray-history.sqlite3
-xray history --database ../xray-history.sqlite3 --limit 20
-\`\`\`
+    xray scan ./path/to/project --output ../project-report.json --database ../xray-history.sqlite3
+    xray history --database ../xray-history.sqlite3 --limit 20
 
 Default resource limits are 1 MB per file, 20,000 files, 512 MiB total file bytes,
 120 seconds per scan, 100,000 filesystem entries, and 64 directory levels.
@@ -61,9 +51,7 @@ state explicitly when a limit caused a partial scan.
 Third-party plugin loading is opt-in and requires an exact allowlist. Plugins execute
 inside the X-Ray process and are not sandboxed; review and pin them before trusting:
 
-\`\`\`bash
-xray scan ./source --load-plugins --trusted-plugin reviewed-plugin-name
-\`\`\`
+    xray scan ./source --load-plugins --trusted-plugin reviewed-plugin-name
 
 ## Safety boundaries
 
@@ -74,8 +62,8 @@ xray scan ./source --load-plugins --trusted-plugin reviewed-plugin-name
 - JSON and SQLite output must be placed outside the project being scanned.
 - A clean scan is not proof that a project is secure or completely understood.
 
-See [docs/security-hardening.md](docs/security-hardening.md), [docs/architecture.md](docs/architecture.md), and [docs/plugins.md](docs/plugins.md).
+See docs/security-hardening.md, docs/architecture.md, and docs/plugins.md.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See LICENSE.

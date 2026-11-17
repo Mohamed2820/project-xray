@@ -23,27 +23,38 @@ def _build_parser() -> argparse.ArgumentParser:
     scan.add_argument("path", type=Path)
     scan.add_argument("--output", "-o", type=Path, default=Path("xray-report.json"))
     scan.add_argument(
-        "--database", type=Path,
+        "--database",
+        type=Path,
         help="Optional SQLite history database stored outside the scanned project.",
     )
     scan.add_argument(
-        "--max-files", type=int, default=MAX_FILES,
+        "--max-files",
+        type=int,
+        default=MAX_FILES,
         help=f"Maximum number of files to inventory (default: {MAX_FILES}).",
     )
     scan.add_argument(
-        "--max-total-mb", type=int, default=MAX_TOTAL_BYTES // (1024 * 1024),
+        "--max-total-mb",
+        type=int,
+        default=MAX_TOTAL_BYTES // (1024 * 1024),
         help="Maximum total file bytes to process in MiB.",
     )
     scan.add_argument(
-        "--max-scan-seconds", type=float, default=MAX_SCAN_SECONDS,
+        "--max-scan-seconds",
+        type=float,
+        default=MAX_SCAN_SECONDS,
         help="Maximum scan wall-clock budget in seconds.",
     )
     scan.add_argument(
-        "--load-plugins", action="store_true",
+        "--load-plugins",
+        action="store_true",
         help="Load only explicitly named trusted plugins; this is not a sandbox.",
     )
     scan.add_argument(
-        "--trusted-plugin", action="append", default=[], metavar="ENTRY_POINT",
+        "--trusted-plugin",
+        action="append",
+        default=[],
+        metavar="ENTRY_POINT",
         help="Exact xray.analyzers entry-point name to trust (repeatable).",
     )
     history = subparsers.add_parser("history", help="List saved scan snapshots.")
@@ -62,7 +73,8 @@ def main() -> int:
             parser.error("--trusted-plugin requires --load-plugins.")
         if args.max_total_mb < 1:
             parser.error("--max-total-mb must be positive.")
-        if args.max_files < 1 or not math.isfinite(args.max_scan_seconds) or args.max_scan_seconds <= 0:
+        invalid_time = not math.isfinite(args.max_scan_seconds)
+        if args.max_files < 1 or invalid_time or args.max_scan_seconds <= 0:
             parser.error("--max-files and --max-scan-seconds must be finite positive values.")
 
         connector = LocalFilesystemConnector(args.path)
@@ -101,7 +113,10 @@ def main() -> int:
             f"{len(report.edges)} edges, {len(report.findings)} findings)."
         )
         if report.coverage["scan_limit_reached"]:
-            print(f"Scan stopped at configured limit: {report.coverage['scan_limit_reached']}")
+            print(
+                "Scan stopped at configured limit: "
+                f"{report.coverage['scan_limit_reached']}"
+            )
         if store is not None:
             print(f"Snapshot saved: {report.scan_id} ({args.database})")
         return 0

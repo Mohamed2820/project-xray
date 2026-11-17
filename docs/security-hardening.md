@@ -5,7 +5,7 @@
 - Source files are parsed as data; the default scan path does not import or execute target-project code.
 - Filesystem traversal streams directory entries, does not follow symbolic links, and caps depth and visited entries.
 - The scanner caps individual file size, file count, aggregate bytes, and elapsed scan time. A limit produces an explicitly partial report; it is never labeled as complete.
-- Python source and secret scans use bounded reads and reject symbolic links/non-regular files where the host supports \`O_NOFOLLOW\`.
+- Python source and secret scans use bounded reads and reject symbolic links/non-regular files where the host supports O_NOFOLLOW.
 - Secret matches report only rule IDs and locations. Matched values and source snippets are not copied into findings.
 - JSON reports are written atomically with private temporary-file permissions and reject an existing destination symlink.
 - SQLite history rejects a symlink database path, uses private file permissions on POSIX, parameterized SQL, and disables trusted schema.
@@ -29,12 +29,12 @@ Applications may lower or raise scanner limits explicitly. A custom connector or
 ## GitHub repository settings still required
 
 Workflow files cannot enforce repository-level branch protection by themselves. In GitHub
-repository **Settings → Rules → Rulesets**, create an active branch ruleset targeting
-\`main\` and enable:
+repository Settings -> Rules -> Rulesets, create an active branch ruleset targeting main
+and enable:
 
 1. Require a pull request before merging (zero required approvals is suitable for a
    single-maintainer repository; add independent reviewers when available).
-2. Require status checks: \`test (3.13)\` and \`security\`.
+2. Require status checks: test (3.13) and security.
 3. Block force pushes and branch deletion.
 4. Do not grant routine bypass to administrators; retain emergency bypass only if you
    intentionally accept that risk.
