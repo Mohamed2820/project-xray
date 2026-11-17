@@ -22,7 +22,13 @@ main{min-width:0;padding:28px clamp(16px,3vw,42px) 48px}.topbar{display:flex;jus
 .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:13px}table{border-collapse:collapse;width:100%;font-size:12px;min-width:620px}th,td{padding:11px 12px;text-align:right;border-bottom:1px solid #202e45;vertical-align:top}th{color:#aabbd3;background:#152239;font-weight:650;white-space:nowrap}tbody tr:last-child td{border-bottom:0}tbody tr:hover{background:#15243b}
 .file-layout{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(290px,.9fr);gap:14px;align-items:start}.file-list{display:grid;gap:6px;max-height:650px;overflow:auto}.file-item{width:100%;text-align:right;border:1px solid transparent;border-radius:9px;background:#0f1a2d;color:#d9e5f6;padding:10px 11px}.file-item:hover,.file-item.selected{background:#182c48;border-color:#37638e}.file-item strong{display:block;font-size:12px;direction:ltr;text-align:left;overflow-wrap:anywhere}.file-item small{color:var(--muted);font-size:10px}
 .detail-kv{display:grid;grid-template-columns:110px minmax(0,1fr);gap:8px;border-bottom:1px solid #223149;padding:8px 0;font-size:12px}.detail-kv:last-child{border:0}.detail-kv span:first-child{color:var(--muted)}.code{direction:ltr;text-align:left;overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
-.list{display:grid;gap:9px}.item{border:1px solid var(--line);background:#101b2e;border-radius:12px;padding:12px}.item h4{margin:0 0 5px;font-size:13px}.item p{margin:4px 0;color:var(--muted);font-size:12px;overflow-wrap:anywhere}.item-top{display:flex;justify-content:space-between;gap:10px;align-items:start}.item button{margin-top:7px}
+.list{display:grid;gap:9px}.item{border:1px solid var(--line);background:#101b2e;border-radius:12px;padding:12px}
+.flow-path{display:grid;grid-template-columns:minmax(0,1fr) 34px minmax(0,1fr);gap:10px;align-items:center;margin:10px 0;direction:rtl}
+.flow-node{border:1px solid #304765;background:#15243a;border-radius:10px;padding:10px;min-width:0}
+.flow-node small{display:block;color:var(--muted);font-size:10px}.flow-node strong{display:block;font-size:12px;overflow-wrap:anywhere}
+.flow-node.source{border-color:#3b7a6e}.flow-node.sink{border-color:#80633a}
+.flow-arrow{text-align:center;color:var(--accent2);font-size:24px;font-weight:800}
+.item h4{margin:0 0 5px;font-size:13px}.item p{margin:4px 0;color:var(--muted);font-size:12px;overflow-wrap:anywhere}.item-top{display:flex;justify-content:space-between;gap:10px;align-items:start}.item button{margin-top:7px}
 .empty{border:1px dashed #3a4c68;border-radius:13px;padding:28px 18px;text-align:center;color:var(--muted);font-size:13px;background:#101a2b}.empty strong{display:block;color:#d2e1f5;font-size:14px;margin-bottom:5px}
 .graph-wrap{border:1px solid var(--line);border-radius:14px;background:radial-gradient(circle at center,#162640,#0d1728);overflow:auto}.graph-wrap svg{display:block;min-width:760px;width:100%;height:auto}.graph-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin:10px 0}.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-left:4px}
 .timeline{display:grid;gap:0}.event{display:grid;grid-template-columns:22px minmax(0,1fr);gap:10px;position:relative;padding:0 0 15px}.event:before{content:"";position:absolute;right:7px;top:17px;bottom:0;width:1px;background:#31445e}.event:last-child:before{display:none}.event-dot{width:15px;height:15px;border-radius:50%;background:#438ec7;border:3px solid #18314c;z-index:1;margin-top:2px}.event h4{font-size:12px;margin:0}.event p{font-size:11px;color:var(--muted);margin:2px 0}
@@ -95,7 +101,9 @@ main{min-width:0;padding:28px clamp(16px,3vw,42px) 48px}.topbar{display:flex;jus
   </section>
 
   <section id="deps" class="page">
-    <div class="section-head"><div><h3>مكتبة الاعتماديات والأدوات · Dependencies</h3><p>الجرد الساكن للحزم والإصدارات ومؤشرات المخاطر</p></div><span id="depCount" class="pill">—</span></div>
+    <div class="section-head"><div><h3>مكتبة الاعتماديات والأدوات · Dependencies</h3><p>الأدوات التي فعّلها المحرك، ثم الحزم والإصدارات ومؤشرات المخاطر</p></div><span id="depCount" class="pill">—</span></div>
+    <div class="section-head"><div><h3>أدوات التحليل · Analyzer Tools</h3><p>حالة المحللات المسجلة في تقرير الفحص</p></div></div><div id="toolList" class="list"></div>
+    <div class="section-head"><div><h3>حزم المشروع · Project Dependencies</h3><p>الاعتماديات المباشرة والانتقالية من ملفات manifests وlockfiles</p></div></div>
     <div class="toolbar"><input id="depSearch" class="field search" type="search" placeholder="ابحث عن حزمة أو نظام..."></div><div id="depList" class="list"></div>
   </section>
 
@@ -198,7 +206,16 @@ function renderGraph(){
 }
 function renderFlows(){
  const items=dataFlows();$("#flowCount").textContent=number(items.length)+" مسار";const list=$("#flowList");clear(list);if(!items.length){empty(list,"لم يتم رصد تدفقات بيانات محتملة");return;}
- items.forEach(function(flow,index){const box=make("div","item"),top=make("div","item-top");top.appendChild(make("h4","","مسار بيانات "+(index+1)));top.appendChild(pill(fmt(flow.sink_type),"warn"));box.appendChild(top);box.appendChild(make("p","code",fmt(flow.source_path)+":"+fmt(flow.source_line)));box.appendChild(make("p","","المصدر يصل إلى العملية الحساسة التالية:"));box.appendChild(make("p","code",fmt(flow.sink_expression)+" · "+fmt(flow.source_path)+":"+fmt(flow.sink_line)));box.appendChild(make("p","", "الدالة: "+fmt(flow.function)+" · الثقة: "+fmt(flow.confidence)));list.appendChild(box);});
+ items.forEach(function(flow,index){
+  const box=make("div","item"),top=make("div","item-top");
+  top.appendChild(make("h4","","مسار بيانات "+(index+1)));top.appendChild(pill(fmt(flow.sink_type),"warn"));box.appendChild(top);
+  const path=make("div","flow-path"),source=make("div","flow-node source"),sink=make("div","flow-node sink");
+  source.appendChild(make("small","","المصدر · Source"));source.appendChild(make("strong","code",fmt(flow.source_path)+":"+fmt(flow.source_line)));
+  sink.appendChild(make("small","","العملية الحساسة · Sink"));sink.appendChild(make("strong","code",fmt(flow.sink_expression)+" · "+fmt(flow.sink_line)));
+  path.appendChild(source);path.appendChild(make("span","flow-arrow","←"));path.appendChild(sink);box.appendChild(path);
+  box.appendChild(make("p","", "الدالة: "+fmt(flow.function)+" · مستوى الثقة: "+fmt(flow.confidence)));
+  list.appendChild(box);
+ });
 }
 function getRuntimeEvents(){const r=state.runtime||runtimeOfReport(),timeline=obj(r.timeline);return arr(timeline.events).length?arr(timeline.events):arr(r.events);}
 function renderErrors(){
@@ -208,9 +225,38 @@ function renderErrors(){
  errors.forEach(function(e){const box=make("div","item");box.appendChild(make("h4","red",fmt(e.exception_type||e.event_type)));box.appendChild(make("p","",fmt(e.detail||e.message||"لم تتوفر تفاصيل إضافية.")));box.appendChild(make("p","code",fmt(e.path)+(e.line?":"+e.line:"")+" · "+fmt(e.timestamp_utc)));output.appendChild(box);});
 }
 function renderDependencies(){
- const items=arr(obj(analyses().dependencies).items),search=$("#depSearch").value.trim().toLowerCase();$("#depCount").textContent=number(items.length)+" اعتماد";const list=$("#depList");clear(list);
- const filtered=items.filter(function(d){return (fmt(d.name).toLowerCase()+" "+fmt(d.ecosystem).toLowerCase()).includes(search);});if(!filtered.length){empty(list,"لا توجد اعتماديات مطابقة");return;}
- filtered.slice(0,1000).forEach(function(d){const box=make("div","item"),top=make("div","item-top");top.appendChild(make("h4","code",fmt(d.name)));top.appendChild(pill(d.direct?"مباشر · Direct":"انتقالي · Transitive",d.direct?"good":""));box.appendChild(top);box.appendChild(make("p","",fmt(d.ecosystem)+" · الإصدار: "+fmt(d.version||d.requested||"غير محدد")));box.appendChild(make("p","", "المصدر: "+fmt(d.source||d.source_path)+" · المخاطر: "+arr(d.risk_flags).join("، ")+" · تنبيهات OSV: "+arr(d.advisory_ids).join(", ")));list.appendChild(box);});
+ const coverage=obj(report().coverage),plugins=arr(coverage.registered_analyzers),toolList=$("#toolList");clear(toolList);
+ plugins.forEach(function(name){
+  const box=make("div","item"),top=make("div","item-top");
+  top.appendChild(make("h4","",fmt(name)));top.appendChild(pill("Plugin مسجل","good"));
+  box.appendChild(top);
+  box.appendChild(make("p","","محلل مضاف إلى Plugin Registry. أنواع الملفات التي يدعمه المحلل تظهر ضمن تفاصيل كل ملف."));
+  toolList.appendChild(box);
+ });
+ const analyzers=[
+  ["Dependency Analyzer","تحليل الحزم والاعتماديات",coverage.dependency_analysis],
+  ["Permission Analyzer","استخراج مؤشرات الصلاحيات",coverage.permission_analysis],
+  ["Data Flow Analyzer","تتبع المصدر إلى العملية الحساسة",coverage.data_flow_analysis],
+  ["ADR Analyzer","فهرسة قرارات التصميم الموثقة",coverage.decision_analysis]
+ ];
+ analyzers.forEach(function(item){
+  const box=make("div","item"),top=make("div","item-top");
+  top.appendChild(make("h4","",item[0]+" · "+item[1]));
+  top.appendChild(pill(statusName(item[2]),item[2]==="analyzed"?"good":item[2]==="partial"?"warn":""));
+  box.appendChild(top);toolList.appendChild(box);
+ });
+ const runtime=make("div","item"),runtimeTop=make("div","item-top");
+ runtimeTop.appendChild(make("h4","","Python Runtime Adapter · مراقب التنفيذ"));
+ runtimeTop.appendChild(pill(coverage.runtime==="not_collected"?"لا يعمل أثناء الفحص الساكن":"تم تسجيل حالة تشغيل",coverage.runtime==="not_collected"?"warn":"good"));
+ runtime.appendChild(runtimeTop);
+ runtime.appendChild(make("p","","يعمل فقط عند طلب trace-python بشكل صريح، ولا يبدأ تنفيذ البرامج تلقائيًا من لوحة المعلومات."));
+ toolList.appendChild(runtime);
+ if(!plugins.length&&!analyzers.length)empty(toolList,"لا تتوفر بيانات أدوات التحليل في التقرير الحالي");
+ const items=arr(obj(analyses().dependencies).items),search=$("#depSearch").value.trim().toLowerCase();
+ $("#depCount").textContent=number(items.length)+" اعتماد";const list=$("#depList");clear(list);
+ const filtered=items.filter(function(d){return (fmt(d.name).toLowerCase()+" "+fmt(d.ecosystem).toLowerCase()).includes(search);});
+ if(!filtered.length){empty(list,"لا توجد اعتماديات مطابقة");return;}
+ filtered.slice(0,1000).forEach(function(d){const box=make("div","item"),top=make("div","item-top");top.appendChild(make("h4","code",fmt(d.name)));top.appendChild(pill(String(d.direct)==="true"?"مباشر · Direct":"انتقالي · Transitive",String(d.direct)==="true"?"good":""));box.appendChild(top);box.appendChild(make("p","",fmt(d.ecosystem)+" · الإصدار: "+fmt(d.version||d.requested||"غير محدد")));box.appendChild(make("p","", "المصدر: "+fmt(d.source||d.source_path)+" · المخاطر: "+arr(d.risk_flags).join("، ")+" · تنبيهات OSV: "+arr(d.advisory_ids).join(", ")));list.appendChild(box);});
 }
 function renderSecurity(){
  const all=findings().slice().sort(function(a,b){const rank={critical:4,high:3,medium:2,low:1};return (rank[b.severity]||0)-(rank[a.severity]||0);}),summary=$("#securitySummary");clear(summary);
