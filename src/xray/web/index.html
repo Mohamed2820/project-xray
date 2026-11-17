@@ -246,8 +246,9 @@ function renderDependencies(){
   box.appendChild(top);toolList.appendChild(box);
  });
  const runtime=make("div","item"),runtimeTop=make("div","item-top");
+ const runtimeRecorded=Boolean(coverage.runtime&&coverage.runtime!=="not_collected");
  runtimeTop.appendChild(make("h4","","Python Runtime Adapter · مراقب التنفيذ"));
- runtimeTop.appendChild(pill(coverage.runtime==="not_collected"?"لا يعمل أثناء الفحص الساكن":"تم تسجيل حالة تشغيل",coverage.runtime==="not_collected"?"warn":"good"));
+ runtimeTop.appendChild(pill(!coverage.runtime?"غير متاح":coverage.runtime==="not_collected"?"لا يعمل أثناء الفحص الساكن":"تم تسجيل حالة تشغيل",runtimeRecorded?"good":"warn"));
  runtime.appendChild(runtimeTop);
  runtime.appendChild(make("p","","يعمل فقط عند طلب trace-python بشكل صريح، ولا يبدأ تنفيذ البرامج تلقائيًا من لوحة المعلومات."));
  toolList.appendChild(runtime);
