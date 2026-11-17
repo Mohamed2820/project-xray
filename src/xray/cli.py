@@ -9,14 +9,29 @@ from xray.connectors import LocalFilesystemConnector
 from xray.core.engine import XRayEngine
 from xray.plugins import PluginRegistry
 from xray.report import write_report
+from xray.runtime.python import PythonRuntimeAdapter
 from xray.scanner import MAX_FILES, MAX_SCAN_SECONDS, MAX_TOTAL_BYTES, ProjectScanner
 from xray.storage.sqlite import SQLiteDataEngine
+
+
+def _external_database(path: Path | None, root: Path) -> SQLiteDataEngine | None:
+    if path is None:
+        return None
+    requested = path.expanduser()
+    if requested.is_symlink():
+        raise ValueError("The history database must not be a symbolic link.")
+    resolved = requested.resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError:
+        return SQLiteDataEngine(resolved)
+    raise ValueError("The history database must be stored outside the scanned project.")
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="xray",
-        description="Safely inspect a software project without executing its code.",
+        description="Inspect projects and optionally observe explicitly launched Python programs.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     scan = subparsers.add_parser("scan", help="Run a bounded static project scan.")
@@ -50,9 +65,69 @@ def _build_parser() -> argparse.ArgumentParser:
         "--trusted-plugin", action="append", default=[], metavar="ENTRY_POINT",
         help="Exact xray.analyzers entry-point name to trust (repeatable).",
     )
-    history = subparsers.add_parser("history", help="List saved scan snapshots.")
+
+    trace = subparsers.add_parser(
+        "trace-python",
+        help="EXPLICITLY EXECUTE one Python script and collect bounded runtime telemetry.",
+        description=(
+            "Runs the chosen Python script in a child process. This is not a sandbox: "
+            "the target inherits the current user's permissions and environment."
+        ),
+    )
+    trace.add_argument("path", type=Path, help="Project root.")
+    trace.add_argument("script", type=Path, help="Python .py file inside the project root.")
+    trace.add_argument("--output", "-o", type=Path, default=Path("xray-runtime-report.json"))
+    trace.add_argument("--database", type=Path, help="Optional external SQLite history database.")
+    trace.add_argument("--max-events", type=int, default=10_000)
+    trace.add_argument("--max-seconds", type=float, default=120.0)
+    trace.add_argument(
+        "program_args",
+        nargs=argparse.REMAINDER,
+        help="Arguments for the target program; place them after --.",
+    )
+
+    repair = subparsers.add_parser(
+        "record-repair",
+        help="Record a repair attempt and its already-observed test result (does not run tests).",
+    )
+    repair.add_argument("--database", type=Path, required=True)
+    repair.add_argument("--project", type=Path, required=True)
+    repair.add_argument("--summary", required=True)
+    repair.add_argument(
+        "--outcome",
+        choices=("attempted", "applied", "reverted", "failed"),
+        default="attempted",
+    )
+    repair.add_argument("--changed-file", action="append", default=[])
+    repair.add_argument("--session-id")
+    repair.add_argument("--test-command")
+    repair.add_argument("--test-exit-code", type=int)
+    repair.add_argument("--test-summary")
+
+    history = subparsers.add_parser("history", help="List saved static scan snapshots.")
     history.add_argument("--database", type=Path, required=True)
     history.add_argument("--limit", type=int, default=20)
+
+    runtime_history = subparsers.add_parser(
+        "runtime-history", help="List saved Python runtime sessions."
+    )
+    runtime_history.add_argument("--database", type=Path, required=True)
+    runtime_history.add_argument("--project", type=Path)
+    runtime_history.add_argument("--limit", type=int, default=20)
+
+    repair_history = subparsers.add_parser(
+        "repair-history", help="List recorded repair attempts."
+    )
+    repair_history.add_argument("--database", type=Path, required=True)
+    repair_history.add_argument("--project", type=Path)
+    repair_history.add_argument("--limit", type=int, default=20)
+
+    test_history = subparsers.add_parser(
+        "test-history", help="List recorded test results."
+    )
+    test_history.add_argument("--database", type=Path, required=True)
+    test_history.add_argument("--project", type=Path)
+    test_history.add_argument("--limit", type=int, default=20)
     return parser
 
 
@@ -82,6 +157,7 @@ def main() -> int:
         else:
             raise ValueError("The report output must be stored outside the scanned project.")
 
+        store = _external_database(args.database, connector.root)
         osv_database = args.osv_db.expanduser() if args.osv_db else None
         if osv_database is not None:
             if osv_database.is_symlink():
@@ -96,7 +172,6 @@ def main() -> int:
                 f"Loaded explicitly trusted plugin(s): {', '.join(loaded)}. "
                 "Plugins run with X-Ray process permissions."
             )
-        store = SQLiteDataEngine(args.database) if args.database else None
         scanner = ProjectScanner(
             registry=registry,
             max_files=args.max_files,
@@ -104,8 +179,10 @@ def main() -> int:
             max_scan_seconds=args.max_scan_seconds,
             osv_database=osv_database,
         )
-        engine = XRayEngine(scanner=scanner, data_engine=store)
-        report = engine.scan(connector, persist=store is not None)
+        report = XRayEngine(
+            scanner=scanner,
+            data_engine=store,
+        ).scan(connector, persist=store is not None)
         write_report(report, output)
         state = "complete" if report.coverage["scan_complete"] else "partial"
         print(
@@ -129,11 +206,120 @@ def main() -> int:
             )
             print(f"Snapshot saved: {report.scan_id} ({args.database})")
         return 0
+
+    if args.command == "trace-python":
+        if not 1 <= args.max_events <= 100_000:
+            parser.error("--max-events must be between 1 and 100000.")
+        if not math.isfinite(args.max_seconds) or not 0 < args.max_seconds <= 600:
+            parser.error("--max-seconds must be finite and between 0 and 600.")
+        connector = LocalFilesystemConnector(args.path)
+        store = _external_database(args.database, connector.root)
+        requested_output = args.output.expanduser()
+        if requested_output.is_symlink():
+            raise ValueError("The runtime report destination must not be a symbolic link.")
+        try:
+            requested_output.resolve().relative_to(connector.root)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("The runtime report must be stored outside the scanned project.")
+        if store is not None:
+            database = store.database_path.resolve()
+            try:
+                database.relative_to(connector.root)
+            except ValueError:
+                pass
+            else:
+                raise ValueError("The history database must be stored outside the scanned project.")
+
+        report = XRayEngine(data_engine=store).scan(connector)
+        runtime = PythonRuntimeAdapter().trace(
+            report,
+            connector.root,
+            args.script,
+            requested_output,
+            args.program_args,
+            max_events=args.max_events,
+            max_seconds=args.max_seconds,
+            database=store,
+        )
+        if store is not None:
+            store.save_report(report)
+        print(
+            f"Runtime report written to {requested_output} "
+            f"(session={runtime['session_id']}, events={len(runtime['events'])}, "
+            f"exit_code={runtime['exit_code']})."
+        )
+        cause = runtime.get("root_cause", {})
+        if cause.get("status") == "correlated":
+            component = cause.get("root_component") or {}
+            print(
+                f"Root cause candidate: {component.get('path')}:{component.get('line')} "
+                f"(confidence={cause.get('confidence', 0.0):.2f})."
+            )
+        else:
+            print(f"Root cause status: {cause.get('status', 'unknown')}.")
+        return 0 if runtime["status"] == "success" else 1
+
+    if args.command == "record-repair":
+        connector = LocalFilesystemConnector(args.project)
+        store = _external_database(args.database, connector.root)
+        assert store is not None
+        result = store.record_repair_attempt(
+            connector.root,
+            args.summary,
+            args.outcome,
+            changed_files=args.changed_file,
+            session_id=args.session_id,
+            test_command=args.test_command,
+            test_exit_code=args.test_exit_code,
+            test_summary=args.test_summary,
+        )
+        print(f"Repair attempt recorded: {result['repair_id']}")
+        if result["test_run_id"]:
+            print(f"Test result recorded: {result['test_run_id']}")
+        print("No repair or test command was executed by this recording operation.")
+        return 0
+
     if args.command == "history":
         for item in SQLiteDataEngine(args.database).list_scans(args.limit):
             print(
                 f"{item['scan_id']}  {item['created_at']}  "
                 f"{item['file_count']} files  {item['finding_count']} findings"
+            )
+        return 0
+
+    if args.command == "runtime-history":
+        for item in SQLiteDataEngine(args.database).list_runtime_sessions(
+            str(args.project.resolve()) if args.project else None,
+            args.limit,
+        ):
+            print(
+                f"{item['session_id']}  {item['started_at']}  "
+                f"{item['status']}  exit={item['exit_code']}  {item['script']}"
+            )
+        return 0
+
+    if args.command == "repair-history":
+        for item in SQLiteDataEngine(args.database).list_repair_attempts(
+            str(args.project.resolve()) if args.project else None,
+            args.limit,
+        ):
+            print(
+                f"{item['repair_id']}  {item['created_at']}  "
+                f"{item['outcome']}  {item['summary']}"
+            )
+        return 0
+
+    if args.command == "test-history":
+        for item in SQLiteDataEngine(args.database).list_test_runs(
+            str(args.project.resolve()) if args.project else None,
+            args.limit,
+        ):
+            state = "passed" if item["passed"] else "failed"
+            print(
+                f"{item['test_run_id']}  {item['created_at']}  "
+                f"{state} (exit={item['exit_code']})  {item['command']}"
             )
         return 0
     return 2

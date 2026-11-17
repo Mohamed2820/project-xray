@@ -2,11 +2,11 @@
 
 **Universal Project Intelligence and Observability Platform**
 
-Project X-Ray statically inspects software projects, builds an evidence-backed project graph, and produces machine-readable scan snapshots.
+Project X-Ray statically inspects software projects, builds an evidence-backed component graph, and offers an explicitly opted-in Python runtime observer.
 
 ## Current implementation
 
-Phases 1–3 provide:
+Phases 1–4 provide:
 
 - Read-only local filesystem inventory, symlink protection, and resource budgets.
 - Python file, class, function, import, and call-site analysis.
@@ -17,10 +17,12 @@ Phases 1–3 provide:
 - Heuristic intra-function Python data-flow tracing from recognized input sources to sensitive sinks.
 - Explicit Markdown Architecture Decision Record (ADR) inventory.
 - SHA-256 file history and impact summaries between persisted X-Ray SQLite snapshots.
-- Directed Graph Engine, SQLite report history, and JSON output.
+- Python runtime collection for function calls/returns, selected process/network/filesystem/thread audit events, and exception stack traces.
+- Event chronology reconstruction, runtime-to-static component correlation, heuristic root-cause confidence, and affected caller-component summaries.
+- SQLite runtime sessions, repair-attempt records, and test-result history.
 - CI on Python 3.11–3.13 with Ruff, pytest, Bandit, and pip-audit.
 
-The built-in semantic source analyzer is Python-focused. Other language files are inventoried and may contribute dependency/config metadata but are not semantically parsed unless a compatible analyzer plugin is registered.
+The built-in semantic and runtime adapters currently support Python. The runtime adapter protocol is an extension point for future language-specific collectors; it does not imply those collectors are already implemented.
 
 ## Install
 
@@ -32,7 +34,7 @@ Security checks:
     bandit -r src -ll
     pip-audit
 
-## Scan
+## Static scan
 
 Basic scan:
 
@@ -52,24 +54,58 @@ Optionally compare exact package/version pairs with a locally supplied OSV JSON 
 
 The supported offline dataset shape is an OSV JSON object with a top-level vulns list, package ecosystem/name, and affected versions entries. This mode performs exact-version matching only; it does not resolve ranges or make network calls.
 
-Default limits: 1 MB per file, 20,000 files, 512 MiB aggregate bytes, 120 seconds per scan, 100,000 filesystem entries, and 64 directory levels. Reports identify partial scans and unsupported analysis.
+## Explicit Python runtime observation
 
-Third-party plugins require an exact trust allowlist and execute in-process. They are not sandboxed:
+**Important:** trace-python executes the selected script. It is not a sandbox. The target inherits the current user's operating-system permissions and environment and can access files or the network that the user can access. Use it only with code you trust.
 
-    xray scan ./source --load-plugins --trusted-plugin reviewed-plugin-name
+Example with a report and persistent history stored outside the project:
+
+    xray trace-python --output ../runtime-report.json --database ../xray-history.sqlite3 --max-events 10000 --max-seconds 120 ./my-project app.py -- --verbose
+
+The options must appear before the project and script paths. Arguments after the separator -- are passed to the target program.
+
+The collector records Python function calls/returns and selected audit event categories. It records no function arguments, local-variable values, return values, environment variables, command arguments, stdout/stderr, file contents, or network payloads. Exception messages are redacted with the project's credential patterns; stack traces contain project-relative paths, line numbers, and function names, not source snippets.
+
+Default runtime limits: 10,000 events and 120 seconds. Maximums: 100,000 events and 600 seconds. The parent process terminates the runtime process group on timeout on POSIX systems; on Windows it terminates the observed process, and descendant cleanup is platform-dependent.
+
+List previous sessions:
+
+    xray runtime-history --database ../xray-history.sqlite3
+
+## Record repair attempts and test results
+
+This command records a repair outcome and a test result already obtained elsewhere. It does not edit files, execute a repair, or run the supplied test command:
+
+    xray record-repair --database ../xray-history.sqlite3 --project ./my-project --summary "Fixed failing parser edge case" --outcome applied --changed-file src/parser.py --test-command "pytest -q" --test-exit-code 0 --test-summary "68 passed"
+
+Review history:
+
+    xray repair-history --database ../xray-history.sqlite3
+    xray test-history --database ../xray-history.sqlite3
+
+The recorded command, summary, and file paths are redacted before persistence.
 
 ## Analysis boundaries
 
-- The default path does not execute project code, install dependencies, contact package registries, or send source files to an AI service.
+- The default scan path does not execute project code, install dependencies, contact package registries, or send source files to an AI service.
 - Dependency transitive coverage depends on the ecosystem's available lockfile.
 - Dependency risk flags are metadata heuristics. A known advisory is reported only when an exact package/ecosystem/version matches the supplied offline OSV dataset.
 - Android declarations do not prove user grants or actual runtime use.
 - Data-flow tracing is heuristic and intra-function; it does not prove exploitability or model all sanitizers, aliases, dynamic behavior, or cross-file flows.
 - Change analysis requires persisted snapshots and compares file hashes; it does not infer Git authors or commits.
 - ADR analysis only reports explicit Markdown records in recognized locations.
-- Secret matching is heuristic. A clean report does not prove the absence of secrets or vulnerabilities.
+- Runtime instrumentation currently observes Python only. Selected audit events are not an exhaustive OS monitor; native activity, child-process internals, and other language runtimes can be missed.
+- Root-cause confidence is heuristic correlation, not proof. Low-confidence matches must be reviewed.
+- Runtime telemetry may be incomplete if event/time limits are reached or a process terminates abruptly. It is not tamper-proof against the executed target.
+- A clean report does not prove absence of secrets, vulnerabilities, or runtime defects.
 
-See docs/security-hardening.md, docs/architecture.md, and docs/plugins.md.
+Default static limits: 1 MB per file, 20,000 files, 512 MiB aggregate bytes, 120 seconds per scan, 100,000 filesystem entries, and 64 directory levels. Reports identify partial scans and unsupported analysis.
+
+Third-party analyzer plugins require an exact trust allowlist and execute in-process. They are not sandboxed:
+
+    xray scan ./source --load-plugins --trusted-plugin reviewed-plugin-name
+
+See docs/runtime-monitoring.md, docs/security-hardening.md, docs/architecture.md, and docs/plugins.md.
 
 ## License
 

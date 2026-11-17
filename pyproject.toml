@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "project-xray"
-version = "0.4.0"
+version = "0.5.0"
 description = "Universal Project Intelligence and Observability Platform"
 readme = "README.md"
 requires-python = ">=3.11"

@@ -122,3 +122,42 @@ def scan_secrets(
                 )
             )
     return findings
+
+
+
+def redact_sensitive_text(value: str) -> str:
+    """Redact common credential shapes before embedding untrusted text in reports."""
+    result = re.sub(
+        r"(?im)(-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----)"
+        r".*?(-----END (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----)",
+        r"\1[REDACTED]\2",
+        value,
+        flags=re.DOTALL,
+    )
+    result = re.sub(
+        r"(?i)(authorization\s*[:=]\s*Bearer\s+)[A-Za-z0-9._~+/-]+",
+        r"\1[REDACTED]",
+        result,
+    )
+    result = re.sub(
+        r"(?i)(\bBearer\s+)[A-Za-z0-9._~+/-]{8,}",
+        r"\1[REDACTED]",
+        result,
+    )
+    result = re.sub(
+        r"(?i)(https?://)[^/@\s]+@",
+        r"\1[REDACTED]@",
+        result,
+    )
+    result = re.sub(
+        r"(?i)([?&](?:token|access_token|api_key|password|secret)=)[^&\s]+",
+        r"\1[REDACTED]",
+        result,
+    )
+    result = _ASSIGNMENT.sub(
+        lambda match: f"{match.group('key')}=[REDACTED]",
+        result,
+    )
+    for _, pattern in _PATTERNS:
+        result = pattern.sub("[REDACTED_TOKEN]", result)
+    return result

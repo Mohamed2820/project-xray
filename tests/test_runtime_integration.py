@@ -1,0 +1,119 @@
+import json
+import sqlite3
+from pathlib import Path
+
+from xray.core.engine import XRayEngine
+from xray.runtime.session import run_python_trace
+from xray.storage.sqlite import SQLiteDataEngine
+
+
+def test_child_runtime_trace_captures_exception_and_correlates_static_code(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "fixture-project"
+    project.mkdir()
+    script = project / "app.py"
+    secret = "Bearer runtime-secret-token-123456789"
+    script.write_text(
+        "def worker():\n"
+        "    raise ValueError(" + repr(secret) + ")\n"
+        "\n"
+        "def main():\n"
+        "    worker()\n"
+        "\n"
+        "main()\n",
+        encoding="utf-8",
+    )
+    database = SQLiteDataEngine(tmp_path / "history.sqlite3")
+    report = XRayEngine(data_engine=database).scan(project)
+    output = tmp_path / "runtime-report.json"
+
+    runtime = run_python_trace(
+        report,
+        project,
+        "app.py",
+        output,
+        max_events=500,
+        max_seconds=20,
+        database=database,
+    )
+
+    assert runtime["status"] == "failed"
+    assert runtime["exit_code"] == 1
+    assert runtime["error_type"] == "ValueError"
+    assert runtime["summary"]["arguments_captured"] is False
+    assert any(event["event_type"] == "function_call" for event in runtime["events"])
+    assert any(event["event_type"] == "exception" for event in runtime["events"])
+    assert runtime["root_cause"]["status"] == "correlated"
+    assert runtime["root_cause"]["root_component"]["name"] == "worker"
+    assert runtime["root_cause"]["confidence"] >= 0.8
+    assert any(
+        item["name"] == "main"
+        for item in runtime["root_cause"]["affected_components"]
+    )
+    assert runtime["timeline"]["event_count"] == len(runtime["events"])
+    assert runtime["timeline"]["function_spans"]
+    assert secret not in json.dumps(runtime)
+    assert output.exists()
+    assert any(node.kind == "runtime_function" for node in report.nodes)
+    assert any(edge.relation == "runtime_calls" for edge in report.edges)
+    assert report.findings[-1].rule_id == "runtime_unhandled_exception"
+    sessions = database.list_runtime_sessions(str(project))
+    assert len(sessions) == 1
+    assert sessions[0]["exit_code"] == 1
+    with sqlite3.connect(database.database_path) as connection:
+        saved_json = connection.execute(
+            "SELECT report_json FROM runtime_sessions WHERE session_id = ?",
+            (runtime["session_id"],),
+        ).fetchone()[0]
+        event_count = connection.execute(
+            "SELECT COUNT(*) FROM runtime_events WHERE session_id = ?",
+            (runtime["session_id"],),
+        ).fetchone()[0]
+    assert secret not in saved_json
+    assert event_count == len(runtime["events"])
+
+
+def test_runtime_execution_is_explicit_and_static_scan_does_not_run_target(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "safe-project"
+    project.mkdir()
+    marker = tmp_path / "must-not-exist.txt"
+    script = project / "main.py"
+    script.write_text(
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('executed')\n",
+        encoding="utf-8",
+    )
+
+    report = XRayEngine().scan(project)
+    assert report.coverage["code_execution"] is False
+    assert not marker.exists()
+    assert not report.analyses.get("runtime")
+
+
+
+def test_runtime_refuses_script_escape_and_report_symlink(tmp_path: Path) -> None:
+    import pytest
+
+    project = tmp_path / "safe-project"
+    project.mkdir()
+    script = project / "main.py"
+    script.write_text("print('must not run')\n", encoding="utf-8")
+    outside = tmp_path / "outside.py"
+    outside.write_text("raise RuntimeError('outside script executed')\n", encoding="utf-8")
+    report = XRayEngine().scan(project)
+
+    with pytest.raises(ValueError, match="inside the project root"):
+        run_python_trace(
+            report, project, outside, tmp_path / "outside-report.json"
+        )
+
+    target = tmp_path / "protected-report.json"
+    target.write_text("keep-existing-content", encoding="utf-8")
+    symlink = tmp_path / "report-link.json"
+    symlink.symlink_to(target)
+    with pytest.raises(ValueError, match="symbolic link"):
+        run_python_trace(report, project, "main.py", symlink)
+    assert target.read_text(encoding="utf-8") == "keep-existing-content"
