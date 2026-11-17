@@ -94,7 +94,7 @@ def run_target(
         }
         with collector:
             compiled = compile(source, str(resolved_script), "exec")
-            exec(compiled, namespace, namespace)
+            exec(compiled, namespace, namespace)  # nosec B102 - explicit opt-in target execution in child process
     except SystemExit as error:
         caught = error
         if error.code is None:
