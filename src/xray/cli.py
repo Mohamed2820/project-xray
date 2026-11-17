@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from xray.connectors import LocalFilesystemConnector
 from xray.core.engine import XRayEngine
 from xray.plugins import PluginRegistry
 from xray.report import write_report
@@ -41,6 +42,17 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = _build_parser().parse_args()
     if args.command == "scan":
+        connector = LocalFilesystemConnector(args.path)
+        output = args.output.expanduser().resolve()
+        try:
+            output.relative_to(connector.root)
+        except ValueError:
+            pass
+        else:
+            raise ValueError(
+                "The report output must be stored outside the scanned project."
+            )
+
         registry = PluginRegistry.with_builtins()
         if args.load_plugins:
             loaded = registry.load_entry_points()
@@ -50,10 +62,10 @@ def main() -> int:
             scanner=ProjectScanner(registry=registry),
             data_engine=store,
         )
-        report = engine.scan(args.path, persist=store is not None)
-        write_report(report, args.output)
+        report = engine.scan(connector, persist=store is not None)
+        write_report(report, output)
         print(
-            f"Report written to {args.output} "
+            f"Report written to {output} "
             f"({len(report.files)} files, {len(report.nodes)} nodes, "
             f"{len(report.edges)} edges, {len(report.findings)} findings)."
         )
