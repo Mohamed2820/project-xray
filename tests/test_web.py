@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 import urllib.error
 import urllib.request
@@ -145,11 +146,13 @@ def test_dashboard_rejects_untrusted_host_header(tmp_path: Path) -> None:
 
 def test_dashboard_does_not_initialize_or_modify_empty_database(tmp_path: Path) -> None:
     database = tmp_path / "empty.sqlite3"
-    database.write_bytes(b"")
+    with sqlite3.connect(database):
+        pass
+    original_bytes = database.read_bytes()
     server = create_dashboard_server(database_path=database, port=0)
     status, _headers, body = _request(server, "/api/history")
     assert status == 200
     assert json.loads(body) == {
         "scans": [], "runtimes": [], "repairs": [], "tests": []
     }
-    assert database.read_bytes() == b""
+    assert database.read_bytes() == original_bytes
