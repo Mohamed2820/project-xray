@@ -38,7 +38,7 @@ python-versions = "*"
 ''',
         "requirements.txt": "git+https://fake-user:fake-password@git.example.invalid/fixture.git#egg=fixture-git-module\n",
         "src/api/__init__.py": '"""Synthetic commerce API benchmark package."""\n',
-        "src/api/handlers.py": '''"""Intentionally vulnerable handlers for static-analysis benchmarking."""
+        "src/api/handlers.py": '''"""Intentionally vulnerable sample handlers."""
 import os
 import subprocess
 
@@ -68,18 +68,18 @@ def update_user(request, cursor):
     user_id = request.args.get("user_id")
     return write_user(cursor, user_id)
 ''',
-        "src/api/database.py": '''"""Database layer; contains the sink for the cross-file benchmark gap."""
+        "src/api/database.py": '''"""Database layer for the cross-file benchmark gap."""
 
 
 def write_user(cursor, user_id):
     statement = "UPDATE users SET active = 1 WHERE id = " + user_id
     return cursor.execute(statement)
 ''',
-        "src/api/syntax_fault.py": '''"""Deliberately malformed Python source; scanner must report a parse failure."""
+        "src/api/syntax_fault.py": '''"""Malformed Python sample for parse-error checks."""
 def broken_handler(
     return "this file has a syntax error"
 ''',
-        "src/config/credentials.py": '''"""Contains a deliberately fake credential-shaped value for redaction tests."""
+        "src/config/credentials.py": '''"""Fake credential fixture for redaction tests."""
 API_TOKEN = "xray_fixture_not_a_real_credential_123456789"
 ''',
         "src/generated/schema_client.py": '''# GENERATED FILE -- do not edit by hand.
@@ -113,7 +113,7 @@ jobs:
         run: echo "This workflow is a static-analysis fixture only"
     secrets: inherit
 ''',
-        "src/permissions.py": '''"""Small placeholder module for the Android administration fixture."""
+        "src/permissions.py": '''"""Android admin fixture module."""
 
 
 def requested_features():
@@ -151,7 +151,7 @@ def requested_features():
   }
 }
 ''',
-        "src/fake_transport.py": '''"""A deterministic transport stub; it never opens a socket or uses the network."""
+        "src/fake_transport.py": '''"""Deterministic local transport stub; no network I/O."""
 
 
 def post_job(url, payload):
