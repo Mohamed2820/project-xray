@@ -1,9 +1,9 @@
 """Connector contracts shared by local and future remote project sources."""
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from collections.abc import Iterator
 from typing import Protocol, runtime_checkable
 
 

@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import os
 import stat
-from pathlib import Path
 from collections.abc import Iterator
+from pathlib import Path
 
 from xray.connectors.base import FileEntry
 
