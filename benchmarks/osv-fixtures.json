@@ -1,0 +1,13 @@
+{
+  "vulns": [
+    {
+      "id": "XRAY-TEST-ONLY-0001",
+      "affected": [
+        {
+          "package": {"ecosystem": "PyPI", "name": "fixture-http-client"},
+          "versions": ["1.0.0"]
+        }
+      ]
+    }
+  ]
+}
