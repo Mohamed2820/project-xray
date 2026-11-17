@@ -153,15 +153,36 @@ class DashboardData:
         if connection is None:
             return result
         specs = {
-            "scans": ("scans", "scan_id, root, created_at, schema_version, file_count, node_count, edge_count, finding_count", "created_at"),
-            "runtimes": ("runtime_sessions", "session_id, root, script, started_at, finished_at, status, exit_code, error_type", "started_at"),
-            "repairs": ("repair_attempts", "repair_id, root, session_id, created_at, summary, outcome, changed_files_json", "created_at"),
-            "tests": ("test_runs", "test_run_id, root, repair_id, session_id, created_at, command, exit_code, passed, summary", "created_at"),
+            "scans": (
+                "scans",
+                "scan_id, root, created_at, schema_version, file_count, "
+                "node_count, edge_count, finding_count",
+                "created_at",
+            ),
+            "runtimes": (
+                "runtime_sessions",
+                "session_id, root, script, started_at, finished_at, "
+                "status, exit_code, error_type",
+                "started_at",
+            ),
+            "repairs": (
+                "repair_attempts",
+                "repair_id, root, session_id, created_at, summary, "
+                "outcome, changed_files_json",
+                "created_at",
+            ),
+            "tests": (
+                "test_runs",
+                "test_run_id, root, repair_id, session_id, created_at, "
+                "command, exit_code, passed, summary",
+                "created_at",
+            ),
         }
         try:
             for key, (table, columns, order_column) in specs.items():
                 if not self._has_table(connection, table):
                     continue
+                # nosec B608: identifiers come only from the fixed specs above; values are bound below.
                 query = "SELECT " + columns + " FROM " + table
                 params: tuple[Any, ...] = ()
                 if self.project_root is not None:
