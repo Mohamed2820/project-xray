@@ -108,7 +108,7 @@ def main() -> int:
         write_report(report, output)
         state = "complete" if report.coverage["scan_complete"] else "partial"
         print(
-            f"{state.capitalize()} report written to {output} "
+            f"Report written ({state}) to {output} "
             f"({len(report.files)} files, {len(report.nodes)} nodes, "
             f"{len(report.edges)} edges, {len(report.findings)} findings)."
         )
