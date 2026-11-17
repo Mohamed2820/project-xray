@@ -38,3 +38,30 @@ def test_registry_rejects_invalid_plugin_contract() -> None:
     registry = PluginRegistry()
     with pytest.raises(TypeError):
         registry.register(object())  # type: ignore[arg-type]
+
+
+def test_entry_point_loading_requires_explicit_allowlist() -> None:
+    registry = PluginRegistry()
+    with pytest.raises(ValueError, match="allowlist"):
+        registry.load_entry_points([])
+
+
+def test_entry_point_loading_uses_only_approved_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeEntryPoint:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def load(self):
+            return ToyAnalyzer
+
+    class FakeEntryPoints(list):
+        def select(self, *, group: str):
+            assert group == "xray.analyzers"
+            return self
+
+    monkeypatch.setattr(
+        "xray.plugins.entry_points",
+        lambda: FakeEntryPoints([FakeEntryPoint("approved"), FakeEntryPoint("unapproved")]),
+    )
+    registry = PluginRegistry()
+    assert registry.load_entry_points(["approved"]) == ("toy-analyzer",)

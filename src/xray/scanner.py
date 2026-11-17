@@ -1,7 +1,10 @@
-"""Plugin-driven, bounded project indexing and static analysis."""
+"""Plugin-driven project indexing with file, byte, and time budgets."""
 from __future__ import annotations
 
-from pathlib import Path
+import math
+import stat
+import time
+from pathlib import Path, PurePosixPath
 
 from xray.analyzers.secrets import scan_secrets
 from xray.connectors import LocalFilesystemConnector, ProjectConnector
@@ -10,6 +13,10 @@ from xray.graph import ProjectGraph
 from xray.plugins import AnalysisContext, PluginRegistry
 
 MAX_FILE_BYTES = 1_000_000
+MAX_FILES = 20_000
+MAX_TOTAL_BYTES = 512 * 1024 * 1024
+MAX_SCAN_SECONDS = 120.0
+
 LANGUAGE_BY_SUFFIX = {
     ".py": "python", ".js": "javascript", ".jsx": "javascript",
     ".ts": "typescript", ".tsx": "typescript", ".java": "java",
@@ -19,36 +26,84 @@ LANGUAGE_BY_SUFFIX = {
 
 
 class ProjectScanner:
-    """Orchestrates connector traversal, analyzer plugins, and security checks."""
+    """Orchestrates traversal, analyzers, and redacted security checks."""
 
     def __init__(
         self,
         registry: PluginRegistry | None = None,
         max_file_bytes: int = MAX_FILE_BYTES,
+        *,
+        max_files: int = MAX_FILES,
+        max_total_bytes: int = MAX_TOTAL_BYTES,
+        max_scan_seconds: float = MAX_SCAN_SECONDS,
     ) -> None:
-        if max_file_bytes < 1:
-            raise ValueError("max_file_bytes must be positive")
+        if max_file_bytes < 1 or max_files < 1 or max_total_bytes < 1:
+            raise ValueError("File, file-count, and total-byte limits must be positive")
+        if not math.isfinite(max_scan_seconds) or max_scan_seconds <= 0:
+            raise ValueError("max_scan_seconds must be a finite positive number")
         self.registry = registry or PluginRegistry.with_builtins()
         self.max_file_bytes = max_file_bytes
+        self.max_files = max_files
+        self.max_total_bytes = max_total_bytes
+        self.max_scan_seconds = max_scan_seconds
+
+    @staticmethod
+    def _entry_is_safe(connector: ProjectConnector, entry: object) -> bool:
+        try:
+            relative = PurePosixPath(entry.relative_path)  # type: ignore[attr-defined]
+            if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+                return False
+            path = entry.path  # type: ignore[attr-defined]
+            metadata = path.lstat()
+            if not stat.S_ISREG(metadata.st_mode):
+                return False
+            resolved = path.resolve(strict=True)
+            resolved.relative_to(connector.root.resolve(strict=True))
+            return metadata.st_size == entry.size_bytes  # type: ignore[attr-defined]
+        except (AttributeError, OSError, ValueError):
+            return False
 
     def scan(self, connector: ProjectConnector) -> ScanReport:
+        started = time.monotonic()
         report = ScanReport(root=str(connector.root))
+        file_count = 0
+        total_bytes = 0
+        limit_reason: str | None = None
+
         for entry in connector.iter_files():
-            language = LANGUAGE_BY_SUFFIX.get(entry.path.suffix.lower(), "unknown")
+            if time.monotonic() - started >= self.max_scan_seconds:
+                limit_reason = "max_scan_seconds"
+                break
+            if file_count >= self.max_files:
+                limit_reason = "max_files"
+                break
+            file_count += 1
             record = {
                 "path": entry.relative_path,
                 "size_bytes": entry.size_bytes,
-                "language": language,
+                "language": LANGUAGE_BY_SUFFIX.get(entry.path.suffix.lower(), "unknown"),
                 "status": "inventoried",
                 "analyzers": [],
             }
             report.files.append(record)
-            file_node_id = f"file:{entry.relative_path}"
-            report.nodes.append(
-                Node(file_node_id, "file", entry.relative_path, entry.relative_path)
-            )
+            report.nodes.append(Node(
+                f"file:{entry.relative_path}", "file",
+                entry.relative_path, entry.relative_path,
+            ))
+
+            if entry.size_bytes < 0:
+                record["status"] = "invalid_file_metadata"
+                continue
+            if total_bytes + entry.size_bytes > self.max_total_bytes:
+                record["status"] = "skipped_total_size_limit"
+                limit_reason = "max_total_bytes"
+                break
+            total_bytes += entry.size_bytes
             if entry.size_bytes > self.max_file_bytes:
                 record["status"] = "skipped_size_limit"
+                continue
+            if not self._entry_is_safe(connector, entry):
+                record["status"] = "changed_or_unsafe_file"
                 continue
 
             analyzers = self.registry.analyzers_for(entry.path.suffix)
@@ -59,19 +114,22 @@ class ProjectScanner:
                     path=entry.path,
                     relative_path=entry.relative_path,
                     size_bytes=entry.size_bytes,
+                    max_file_bytes=self.max_file_bytes,
                 )
                 try:
                     result = plugin.analyze(context)
-                except Exception as error:  # Plugin boundary; do not leak source data.
-                    errors.append(
-                        {"plugin": plugin.name, "error": type(error).__name__}
-                    )
-                    continue
-                report.nodes.extend(result.nodes)
-                report.edges.extend(result.edges)
-                record["analyzers"].append(plugin.name)
+                    report.nodes.extend(result.nodes)
+                    report.edges.extend(result.edges)
+                    record["analyzers"].append(plugin.name)
+                except Exception as error:
+                    errors.append({"plugin": plugin.name, "error": type(error).__name__})
+                if time.monotonic() - started >= self.max_scan_seconds:
+                    limit_reason = "max_scan_seconds"
+                    break
 
-            report.findings.extend(scan_secrets(entry.path, entry.relative_path))
+            report.findings.extend(scan_secrets(
+                entry.path, entry.relative_path, max_bytes=self.max_file_bytes
+            ))
             if errors:
                 record["status"] = "analysis_error"
                 record["analysis_errors"] = errors
@@ -79,35 +137,68 @@ class ProjectScanner:
                 record["status"] = "analyzed"
             elif not analyzers:
                 record["status"] = "inventory_only"
+            if limit_reason:
+                break
 
         report.nodes = list({node.id: node for node in report.nodes}.values())
         graph = ProjectGraph(report.nodes, report.edges)
+        connector_limit = getattr(connector, "limit_reached", None)
+        connector_errors = getattr(connector, "errors", [])
+        if connector_limit and not limit_reason:
+            limit_reason = f"connector_{connector_limit}"
         report.coverage = {
-            "filesystem_inventory": "complete_with_exclusions",
-            "registered_analyzers": [plugin.name for plugin in self.registry.plugins],
-            "analyzed_files": sum(
-                item["status"] == "analyzed" for item in report.files
+            "filesystem_inventory": (
+                "partial_due_to_limits" if limit_reason
+                else "partial_due_to_connector_errors" if connector_errors
+                else "complete_with_exclusions"
             ),
+            "scan_complete": limit_reason is None and not connector_errors,
+            "scan_limit_reached": limit_reason,
+            "registered_analyzers": [plugin.name for plugin in self.registry.plugins],
+            "analyzed_files": sum(item["status"] == "analyzed" for item in report.files),
             "inventory_only_files": sum(
                 item["status"] == "inventory_only" for item in report.files
             ),
+            "files_seen": file_count,
+            "bytes_considered": total_bytes,
+            "limits": {
+                "max_file_bytes": self.max_file_bytes,
+                "max_files": self.max_files,
+                "max_total_bytes": self.max_total_bytes,
+                "max_scan_seconds": self.max_scan_seconds,
+                "connector_max_entries": getattr(connector, "max_entries", None),
+                "connector_max_depth": getattr(connector, "max_depth", None),
+            },
+            "elapsed_seconds": round(time.monotonic() - started, 3),
             "python_ast": (
-                "supported"
-                if self.registry.analyzers_for(".py")
-                else "not_registered"
+                "supported" if self.registry.analyzers_for(".py") else "not_registered"
             ),
             "other_language_semantics": "plugin_dependent",
             "runtime": "not_collected",
             "code_execution": False,
             "network_access": False,
-            "max_file_bytes": self.max_file_bytes,
             "graph_integrity_errors": graph.validate(),
-            "connector_errors": getattr(connector, "errors", []),
+            "connector_errors": connector_errors,
+            "connector_limit_reached": connector_limit,
+            "connector_entries_visited": getattr(connector, "visited_entries", None),
         }
         return report
 
 
-def scan_project(root: Path, max_file_bytes: int = MAX_FILE_BYTES) -> ScanReport:
+def scan_project(
+    root: Path,
+    max_file_bytes: int = MAX_FILE_BYTES,
+    *,
+    max_files: int = MAX_FILES,
+    max_total_bytes: int = MAX_TOTAL_BYTES,
+    max_scan_seconds: float = MAX_SCAN_SECONDS,
+) -> ScanReport:
     """Backward-compatible convenience API for a local project directory."""
     connector = LocalFilesystemConnector(root)
-    return ProjectScanner(max_file_bytes=max_file_bytes).scan(connector)
+    scanner = ProjectScanner(
+        max_file_bytes=max_file_bytes,
+        max_files=max_files,
+        max_total_bytes=max_total_bytes,
+        max_scan_seconds=max_scan_seconds,
+    )
+    return scanner.scan(connector)

@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 
 from xray.connectors import LocalFilesystemConnector
 from xray.core.engine import XRayEngine
 from xray.plugins import PluginRegistry
 from xray.report import write_report
-from xray.scanner import ProjectScanner
+from xray.scanner import MAX_FILES, MAX_SCAN_SECONDS, MAX_TOTAL_BYTES, ProjectScanner
 from xray.storage.sqlite import SQLiteDataEngine
 
 
@@ -18,20 +19,32 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Safely inspect a software project without executing its code.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
-    scan = subparsers.add_parser("scan", help="Run a static project scan.")
+    scan = subparsers.add_parser("scan", help="Run a bounded static project scan.")
     scan.add_argument("path", type=Path)
+    scan.add_argument("--output", "-o", type=Path, default=Path("xray-report.json"))
     scan.add_argument(
-        "--output", "-o", type=Path, default=Path("xray-report.json")
-    )
-    scan.add_argument(
-        "--database",
-        type=Path,
+        "--database", type=Path,
         help="Optional SQLite history database stored outside the scanned project.",
     )
     scan.add_argument(
-        "--load-plugins",
-        action="store_true",
-        help="Load installed xray.analyzers entry points (trusted plugin code).",
+        "--max-files", type=int, default=MAX_FILES,
+        help=f"Maximum number of files to inventory (default: {MAX_FILES}).",
+    )
+    scan.add_argument(
+        "--max-total-mb", type=int, default=MAX_TOTAL_BYTES // (1024 * 1024),
+        help="Maximum total file bytes to process in MiB.",
+    )
+    scan.add_argument(
+        "--max-scan-seconds", type=float, default=MAX_SCAN_SECONDS,
+        help="Maximum scan wall-clock budget in seconds.",
+    )
+    scan.add_argument(
+        "--load-plugins", action="store_true",
+        help="Load only explicitly named trusted plugins; this is not a sandbox.",
+    )
+    scan.add_argument(
+        "--trusted-plugin", action="append", default=[], metavar="ENTRY_POINT",
+        help="Exact xray.analyzers entry-point name to trust (repeatable).",
     )
     history = subparsers.add_parser("history", help="List saved scan snapshots.")
     history.add_argument("--database", type=Path, required=True)
@@ -40,35 +53,55 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    args = _build_parser().parse_args()
+    parser = _build_parser()
+    args = parser.parse_args()
     if args.command == "scan":
+        if args.load_plugins and not args.trusted_plugin:
+            parser.error("--load-plugins requires at least one --trusted-plugin name.")
+        if args.trusted_plugin and not args.load_plugins:
+            parser.error("--trusted-plugin requires --load-plugins.")
+        if args.max_total_mb < 1:
+            parser.error("--max-total-mb must be positive.")
+        if args.max_files < 1 or not math.isfinite(args.max_scan_seconds) or args.max_scan_seconds <= 0:
+            parser.error("--max-files and --max-scan-seconds must be finite positive values.")
+
         connector = LocalFilesystemConnector(args.path)
-        output = args.output.expanduser().resolve()
+        requested_output = args.output.expanduser()
+        if requested_output.is_symlink():
+            raise ValueError("The report destination must not be a symbolic link.")
+        output = requested_output.resolve()
         try:
             output.relative_to(connector.root)
         except ValueError:
             pass
         else:
-            raise ValueError(
-                "The report output must be stored outside the scanned project."
-            )
+            raise ValueError("The report output must be stored outside the scanned project.")
 
         registry = PluginRegistry.with_builtins()
         if args.load_plugins:
-            loaded = registry.load_entry_points()
-            print(f"Loaded {len(loaded)} installed analyzer plugin(s).")
+            loaded = registry.load_entry_points(args.trusted_plugin)
+            print(
+                f"Loaded explicitly trusted plugin(s): {', '.join(loaded)}. "
+                "Plugins run with X-Ray process permissions."
+            )
         store = SQLiteDataEngine(args.database) if args.database else None
-        engine = XRayEngine(
-            scanner=ProjectScanner(registry=registry),
-            data_engine=store,
+        scanner = ProjectScanner(
+            registry=registry,
+            max_files=args.max_files,
+            max_total_bytes=args.max_total_mb * 1024 * 1024,
+            max_scan_seconds=args.max_scan_seconds,
         )
+        engine = XRayEngine(scanner=scanner, data_engine=store)
         report = engine.scan(connector, persist=store is not None)
         write_report(report, output)
+        state = "complete" if report.coverage["scan_complete"] else "partial"
         print(
-            f"Report written to {output} "
+            f"{state.capitalize()} report written to {output} "
             f"({len(report.files)} files, {len(report.nodes)} nodes, "
             f"{len(report.edges)} edges, {len(report.findings)} findings)."
         )
+        if report.coverage["scan_limit_reached"]:
+            print(f"Scan stopped at configured limit: {report.coverage['scan_limit_reached']}")
         if store is not None:
             print(f"Snapshot saved: {report.scan_id} ({args.database})")
         return 0
