@@ -128,6 +128,13 @@ def _build_parser() -> argparse.ArgumentParser:
     test_history.add_argument("--database", type=Path, required=True)
     test_history.add_argument("--project", type=Path)
     test_history.add_argument("--limit", type=int, default=20)
+
+    web = subparsers.add_parser("web", help="Open the Arabic read-only HTML dashboard.")
+    web.add_argument("--report", type=Path, help="Existing X-Ray JSON report.")
+    web.add_argument("--database", type=Path, help="Existing external SQLite history database.")
+    web.add_argument("--project", type=Path, help="Project root used to select matching history.")
+    web.add_argument("--host", default="127.0.0.1", help="IPv4 loopback address only.")
+    web.add_argument("--port", type=int, default=8765, help="Local dashboard port.")
     return parser
 
 
@@ -260,6 +267,19 @@ def main() -> int:
         else:
             print(f"Root cause status: {cause.get('status', 'unknown')}.")
         return 0 if runtime["status"] == "success" else 1
+
+    if args.command == "web":
+        if args.report is None and args.database is None:
+            parser.error("web requires at least one of --report or --database.")
+        from xray.web.server import serve_dashboard
+
+        return serve_dashboard(
+            report_path=args.report,
+            database_path=args.database,
+            project_root=args.project,
+            host=args.host,
+            port=args.port,
+        )
 
     if args.command == "record-repair":
         connector = LocalFilesystemConnector(args.project)
