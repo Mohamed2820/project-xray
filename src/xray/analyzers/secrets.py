@@ -12,7 +12,8 @@ DEFAULT_MAX_BYTES = 1_000_000
 
 _ASSIGNMENT = re.compile(
     r"""(?ix)\b(?P<key>
-        api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|
+        api[_-]?key|github[_-]?token|stripe[_-]?secret[_-]?key|aws[_-]?access[_-]?key[_-]?id|
+        access[_-]?token|refresh[_-]?token|auth[_-]?token|
         oauth[_-]?token|client[_-]?secret|secret(?:[_-]?key)?|
         password|passwd|passphrase|private[_-]?key|
         aws[_-]?secret[_-]?access[_-]?key|credential|token

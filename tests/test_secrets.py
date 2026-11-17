@@ -25,6 +25,8 @@ def test_secret_value_is_never_returned(tmp_path: Path) -> None:
         ("xoxb-" + "A" * 24, "slack_token"),
         ('{"api_key": "jsonsecretvalue123"}', "sensitive_assignment"),
         ("AWS_SECRET_ACCESS_KEY=awssecretvalue123", "sensitive_assignment"),
+        ("GITHUB_TOKEN=genericgithubsecret123", "sensitive_assignment"),
+        ("STRIPE_SECRET_KEY=genericstripesecret123", "sensitive_assignment"),
         ("client_secret: yamlsecretvalue123", "sensitive_assignment"),
     ],
 )
