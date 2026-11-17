@@ -85,6 +85,18 @@ Review history:
 
 The recorded command, summary, and file paths are redacted before persistence.
 
+## Arabic HTML dashboard
+
+Start a local, read-only dashboard from an existing report or an external SQLite history database:
+
+    xray web --database ../xray-history.sqlite3 --project ./my-project
+
+Or open one saved JSON report:
+
+    xray web --report ../project-report.json
+
+The dashboard listens on IPv4 loopback only (default 127.0.0.1:8765). It does not expose a public network listener, execute project code, modify files, or write to the database. Open the printed local address in a browser. Stop the server with Ctrl+C. See docs/web-interface.md for the data sources and security boundaries.
+
 ## Analysis boundaries
 
 - The default scan path does not execute project code, install dependencies, contact package registries, or send source files to an AI service.
