@@ -50,3 +50,13 @@ certification. Secret detection is heuristic and can miss novel formats, encoded
 secrets split across lines, encrypted material, and secrets outside scanned paths. Static
 analysis does not prove runtime safety. Keep dependencies and the host OS updated, review
 security alerts, and retest after material changes.
+
+
+## Phase 3 static analysis boundaries
+
+- Dependency inventory is static and ecosystem/lockfile-dependent. Advisory matches are only made against an explicit offline OSV JSON dataset and exact package/version pairs.
+- Android manifest entries are declarations, not proof of grants or runtime usage.
+- GitHub Actions and deployment permission checks are static heuristics; review the original workflow/manifests before acting.
+- Python data-flow analysis traces selected sources and sinks within one function only. It is not a full taint engine and does not prove exploitability.
+- Decision records are explicit Markdown ADRs only; sensitive-looking content is redacted before being embedded in reports.
+- Change intelligence compares SHA-256 hashes between persisted scan snapshots. It does not claim Git authorship, commit history, rename tracking, or full runtime impact.

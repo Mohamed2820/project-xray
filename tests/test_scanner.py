@@ -53,3 +53,14 @@ def test_scan_reports_complete_when_within_budgets(tmp_path: Path) -> None:
     report = scan_project(tmp_path)
     assert report.coverage["scan_complete"] is True
     assert report.coverage["scan_limit_reached"] is None
+
+
+
+def test_scanner_adds_sha256_to_file_inventory(tmp_path: Path) -> None:
+    import hashlib
+
+    source = tmp_path / "payload.txt"
+    content = b"hash me"
+    source.write_bytes(content)
+    report = scan_project(tmp_path)
+    assert report.files[0]["sha256"] == hashlib.sha256(content).hexdigest()

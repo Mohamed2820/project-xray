@@ -61,3 +61,42 @@ def test_scanner_does_not_follow_symlink(tmp_path: Path) -> None:
     link = tmp_path / "link.txt"
     link.symlink_to(target)
     assert scan_secrets(link, "link.txt") == []
+
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "sk-proj-" + "A" * 40,
+        "eyJ" + "A" * 20 + "." + "B" * 20 + "." + "C" * 20,
+    ],
+)
+def test_detects_additional_token_shapes_and_redacts_values(
+    tmp_path: Path, value: str
+) -> None:
+    source = tmp_path / "credential.env"
+    source.write_text(f"TOKEN={value}", encoding="utf-8")
+    findings = scan_secrets(source, "credential.env")
+    assert findings
+    assert value not in repr(findings)
+
+
+def test_detects_bearer_authorization_header(tmp_path: Path) -> None:
+    token = "BearerSecretTokenValue123456"
+    source = tmp_path / "headers.txt"
+    source.write_text(f"Authorization: Bearer {token}", encoding="utf-8")
+    findings = scan_secrets(source, "headers.txt")
+    assert findings
+    assert token not in repr(findings)
+
+
+
+def test_repeated_character_secret_is_not_silently_treated_as_placeholder(
+    tmp_path: Path,
+) -> None:
+    value = "A" * 32
+    source = tmp_path / "settings.env"
+    source.write_text(f"API_KEY={value}", encoding="utf-8")
+    findings = scan_secrets(source, "settings.env")
+    assert findings
+    assert value not in repr(findings)

@@ -7,11 +7,16 @@
 | X-Ray Core | Orchestrates one scan and exposes the graph | Synchronous local execution |
 | Project Scanner | Inventory, bounded dispatch, security pattern checks | Read-only files up to configured size |
 | Connectors | Expose files through a stable contract | Local filesystem connector |
-| Language Analyzers | Convert source into typed graph elements | Python AST built in |
+| Language Analyzers | Convert source into typed graph elements | Python AST built in; static dependency/config analyzers |
+| Dependency Intelligence | Direct/transitive inventory and advisory risk signals | Manifest/lockfile parsing plus optional offline exact-match OSV dataset |
+| Permission Analysis | Inspect declared platform and workflow/deployment privileges | Android Manifest, GitHub Actions, Dockerfile, and selected YAML checks |
+| Data Lineage | Candidate taint paths from sources to sensitive sinks | Intra-function Python AST heuristic |
+| Change Intelligence | Compare additions/modifications/deletions and structural impact | SHA-256 comparison between persisted snapshots |
+| Decision Intelligence | Inventory explicit ADRs and completeness | Recognized Markdown ADR paths |
 | Plugin Registry | Match extensions to analyzers | Manual registration and explicit entry points |
 | Graph Engine | Index directed relationships and calculate impact | In-memory graph |
 | Data Engine | Save/retrieve scan snapshots | SQLite, schema version 1 |
-| Report Engine | Stable JSON representation | Report schema 1.1 |
+| Report Engine | Stable JSON representation | Report schema 1.2 |
 
 ## Scan flow
 

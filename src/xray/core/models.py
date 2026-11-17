@@ -42,16 +42,15 @@ class Finding:
 
 @dataclass
 class ScanReport:
-    schema_version: str = "1.1"
+    schema_version: str = "1.2"
     root: str = ""
     scan_id: str = field(default_factory=lambda: uuid4().hex)
-    created_at: str = field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
-    )
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     files: list[dict[str, Any]] = field(default_factory=list)
     nodes: list[Node] = field(default_factory=list)
     edges: list[Edge] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
+    analyses: dict[str, Any] = field(default_factory=dict)
     coverage: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:

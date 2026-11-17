@@ -15,6 +15,7 @@ _ASSIGNMENT = re.compile(
         api[_-]?key|github[_-]?token|stripe[_-]?secret[_-]?key|aws[_-]?access[_-]?key[_-]?id|
         access[_-]?token|refresh[_-]?token|auth[_-]?token|
         oauth[_-]?token|client[_-]?secret|secret(?:[_-]?key)?|
+        database[_-]?(?:url|uri)|connection[_-]?string|account[_-]?key|authorization|
         password|passwd|passphrase|private[_-]?key|
         aws[_-]?secret[_-]?access[_-]?key|credential|token
     )\b["']?\s*[:=]\s*["']?(?P<value>[A-Za-z0-9_./+=:@%-]{8,})"""
@@ -28,6 +29,15 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("aws_access_key_id", re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b")),
     ("stripe_secret_key", re.compile(r"\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}\b")),
     ("google_api_key", re.compile(r"\bAIza[0-9A-Za-z_-]{30,}\b")),
+    ("openai_api_key", re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{32,}\b")),
+    (
+        "jwt_token",
+        re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"),
+    ),
+    (
+        "bearer_token",
+        re.compile(r"""(?i)\bauthorization\s*[:=]\s*["']?bearer\s+[A-Za-z0-9._~+/-]{8,}"""),
+    ),
     ("slack_token", re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b")),
     (
         "private_key_header",
@@ -46,7 +56,6 @@ def _is_placeholder(value: str) -> bool:
     return (
         normalized in _PLACEHOLDERS
         or normalized.startswith(("your_", "your-", "replace_", "placeholder_"))
-        or (len(normalized) >= 8 and len(set(normalized)) == 1)
     )
 
 

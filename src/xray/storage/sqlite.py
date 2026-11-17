@@ -65,8 +65,15 @@ class SQLiteDataEngine:
                     );
                     CREATE INDEX IF NOT EXISTS idx_scans_created_at
                     ON scans(created_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_scans_root_created_at
+                    ON scans(root, created_at DESC);
                     PRAGMA user_version = 1;
                 """)
+            else:
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_scans_root_created_at "
+                    "ON scans(root, created_at DESC)"
+                )
 
     def save_report(self, report: ScanReport) -> str:
         self.initialize()
@@ -83,6 +90,23 @@ class SQLiteDataEngine:
                 len(report.findings), payload,
             ))
         return report.scan_id
+
+    def latest_report(self, root: str) -> dict[str, Any] | None:
+        """Return the latest report for the exact normalized project root."""
+        self.initialize()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT report_json FROM scans WHERE root = ? "
+                "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                (root,),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            value = json.loads(row[0])
+        except (json.JSONDecodeError, TypeError):
+            return None
+        return value if isinstance(value, dict) else None
 
     def load_report(self, scan_id: str) -> dict[str, Any] | None:
         self.initialize()

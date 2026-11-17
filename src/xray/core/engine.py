@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from xray.analyzers.changes import compare_snapshots
 from xray.connectors import LocalFilesystemConnector, ProjectConnector
 from xray.core.models import ScanReport
 from xray.graph import ProjectGraph
@@ -11,7 +12,7 @@ from xray.storage.sqlite import SQLiteDataEngine
 
 
 class XRayEngine:
-    """Coordinates connectors, scanning plugins, graph generation, and storage."""
+    """Coordinates scanning, evidence graph generation, history, and change analysis."""
 
     def __init__(
         self,
@@ -56,6 +57,17 @@ class XRayEngine:
 
         report = self.scanner.scan(connector)
         self.last_graph = self.build_graph(report)
-        if persist:
-            self.data_engine.save_report(report)
+        if self.data_engine is not None:
+            previous = self.data_engine.latest_report(str(connector.root))
+            report.analyses["changes"] = compare_snapshots(report.to_dict(), previous)
+            if persist:
+                self.data_engine.save_report(report)
+        else:
+            report.analyses["changes"] = {
+                "status": "history_not_configured",
+                "added": [], "modified": [], "deleted": [],
+                "limitations": [
+                    "Configure an external SQLite history database to compare successive scans."
+                ],
+            }
         return report

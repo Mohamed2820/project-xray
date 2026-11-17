@@ -35,3 +35,20 @@ def test_analyzer_records_imports_with_evidence(tmp_path: Path) -> None:
     imports = [node for node in nodes if node.kind == "import"]
     assert {node.name for node in imports} == {"json", "pathlib"}
     assert all(edge.evidence.line in {1, 2} for edge in edges)
+
+
+
+def test_analysis_metadata_describes_signatures_without_values(tmp_path: Path) -> None:
+    source = tmp_path / "metadata.py"
+    source.write_text(
+        "@decorator(token='do-not-export-this-secret')\n"
+        "def run(client, timeout: int = 3) -> str:\n"
+        "    return client.execute()\n",
+        encoding="utf-8",
+    )
+    nodes, _ = analyze_python(source, "metadata.py")
+    function = next(node for node in nodes if node.kind == "function")
+    serialized = repr(function)
+    assert function.metadata["parameters"] == ["client", "timeout"]
+    assert function.metadata["return_annotation"] == "str"
+    assert "do-not-export-this-secret" not in serialized

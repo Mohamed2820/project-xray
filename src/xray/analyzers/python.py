@@ -6,6 +6,7 @@ import os
 import stat
 from pathlib import Path
 
+from xray.analyzers.safe_io import read_project_text
 from xray.core.models import Edge, Evidence, Node
 
 
@@ -24,19 +25,46 @@ def _read_source(path: Path, max_bytes: int) -> str:
     return content.decode("utf-8")
 
 
+def _safe_symbol(node: ast.AST) -> str:
+    if isinstance(node, ast.Call):
+        return _safe_symbol(node.func)
+    if isinstance(node, (ast.Name, ast.Attribute)):
+        return _safe_unparse(node)
+    return type(node).__name__
+
+
+def _argument_names(arguments: ast.arguments) -> list[str]:
+    names = [item.arg for item in arguments.posonlyargs]
+    names.extend(item.arg for item in arguments.args)
+    if arguments.vararg:
+        names.append("*" + arguments.vararg.arg)
+    names.extend(item.arg for item in arguments.kwonlyargs)
+    if arguments.kwarg:
+        names.append("**" + arguments.kwarg.arg)
+    return names
+
+
 def analyze_python(
     path: Path,
     relative_path: str,
     *,
     max_bytes: int = 1_000_000,
+    root: Path | None = None,
 ) -> tuple[list[Node], list[Edge]]:
-    """Extract declarations, imports, and call sites without executing source code."""
-    source = _read_source(path, max_bytes)
+    """Extract files, classes, functions, imports and call sites without execution."""
+    if root is None:
+        source = _read_source(path, max_bytes)
+    else:
+        source = read_project_text(root, relative_path, max_bytes)
+        if source is None:
+            raise ValueError("Source is unreadable, unsafe, or exceeds the configured size limit.")
     tree = ast.parse(source, filename=relative_path)
-    nodes: list[Node] = []
+    nodes: list[Node] = [Node(
+        f"file:{relative_path}", "file", relative_path, relative_path,
+        metadata={"language": "python", "bytes": len(source.encode("utf-8"))},
+    )]
     edges: list[Edge] = []
     file_id = f"file:{relative_path}"
-    nodes.append(Node(file_id, "file", relative_path, relative_path))
 
     class Visitor(ast.NodeVisitor):
         def __init__(self) -> None:
@@ -44,9 +72,17 @@ def analyze_python(
 
         def visit_ClassDef(self, node: ast.ClassDef) -> None:
             identifier = f"class:{relative_path}:{node.lineno}:{node.name}"
-            nodes.append(Node(identifier, "class", node.name, relative_path, node.lineno))
+            nodes.append(Node(
+                identifier, "class", node.name, relative_path, node.lineno,
+                {
+                    "bases": [_safe_symbol(item) for item in node.bases],
+                    "decorators": [_safe_symbol(item) for item in node.decorator_list],
+                    "keyword_arguments": [item.arg for item in node.keywords],
+                },
+            ))
             edges.append(Edge(
-                self.scope_ids[-1], identifier, "contains", Evidence(relative_path, node.lineno)
+                self.scope_ids[-1], identifier, "contains",
+                Evidence(relative_path, node.lineno),
             ))
             self.scope_ids.append(identifier)
             self.generic_visit(node)
@@ -58,9 +94,28 @@ def analyze_python(
                 + [node.name]
             )
             identifier = f"function:{relative_path}:{node.lineno}:{qualified}"
-            nodes.append(Node(identifier, "function", qualified, relative_path, node.lineno))
+            nodes.append(Node(
+                identifier, "function", qualified, relative_path, node.lineno,
+                {
+                    "parameters": _argument_names(node.args),
+                    "positional_defaults": len(node.args.defaults),
+                    "keyword_only_defaults": sum(
+                        item is not None for item in node.args.kw_defaults
+                    ),
+                    "return_annotation": (
+                        _safe_symbol(node.returns) if node.returns is not None else None
+                    ),
+                    "decorators": [_safe_unparse(item) for item in node.decorator_list],
+                    "async": isinstance(node, ast.AsyncFunctionDef),
+                    "is_generator": any(
+                        isinstance(item, (ast.Yield, ast.YieldFrom))
+                        for item in ast.walk(node)
+                    ),
+                },
+            ))
             edges.append(Edge(
-                self.scope_ids[-1], identifier, "contains", Evidence(relative_path, node.lineno)
+                self.scope_ids[-1], identifier, "contains",
+                Evidence(relative_path, node.lineno),
             ))
             self.scope_ids.append(identifier)
             self.generic_visit(node)
@@ -79,7 +134,10 @@ def analyze_python(
         def visit_Import(self, node: ast.Import) -> None:
             for index, alias in enumerate(node.names):
                 target = f"import:{relative_path}:{node.lineno}:{index}:{alias.name}"
-                nodes.append(Node(target, "import", alias.name, relative_path, node.lineno))
+                nodes.append(Node(
+                    target, "import", alias.name, relative_path, node.lineno,
+                    {"alias": alias.asname},
+                ))
                 edges.append(Edge(
                     file_id, target, "imports", Evidence(relative_path, node.lineno)
                 ))
@@ -87,15 +145,24 @@ def analyze_python(
         def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
             module = "." * node.level + (node.module or "")
             target = f"import:{relative_path}:{node.lineno}:{module}"
-            nodes.append(Node(target, "import", module, relative_path, node.lineno))
+            nodes.append(Node(
+                target, "import", module, relative_path, node.lineno,
+                {"names": [item.name for item in node.names]},
+            ))
             edges.append(Edge(
                 file_id, target, "imports", Evidence(relative_path, node.lineno)
             ))
 
         def visit_Call(self, node: ast.Call) -> None:
-            name = ast.unparse(node.func)
+            name = _safe_symbol(node.func)
             call_id = f"call:{relative_path}:{node.lineno}:{node.col_offset}:{name}"
-            nodes.append(Node(call_id, "call", name, relative_path, node.lineno))
+            nodes.append(Node(
+                call_id, "call", name, relative_path, node.lineno,
+                {
+                    "positional_arguments": len(node.args),
+                    "keyword_arguments": [item.arg for item in node.keywords],
+                },
+            ))
             edges.append(Edge(
                 self.scope_ids[-1], call_id, "calls",
                 Evidence(relative_path, node.lineno, name),
@@ -104,3 +171,10 @@ def analyze_python(
 
     Visitor().visit(tree)
     return nodes, edges
+
+
+def _safe_unparse(node: ast.AST) -> str:
+    try:
+        return ast.unparse(node)
+    except (ValueError, TypeError):
+        return type(node).__name__

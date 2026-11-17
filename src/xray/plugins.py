@@ -44,7 +44,8 @@ class PythonAnalyzerPlugin:
 
     def analyze(self, context: AnalysisContext) -> AnalysisResult:
         nodes, edges = analyze_python(
-            context.path, context.relative_path, max_bytes=context.max_file_bytes
+            context.path, context.relative_path,
+            max_bytes=context.max_file_bytes, root=context.root
         )
         return AnalysisResult(nodes=nodes, edges=edges)
 

@@ -49,3 +49,29 @@ def test_database_symlink_is_rejected(tmp_path: Path) -> None:
     link.symlink_to(target)
     with pytest.raises(ValueError, match="symbolic link"):
         SQLiteDataEngine(link).initialize()
+
+
+
+def test_engine_compares_successive_scan_snapshots(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    source = project / "main.py"
+    source.write_text("def first():\n    return 1\n", encoding="utf-8")
+    deleted = project / "deleted.py"
+    deleted.write_text("def old():\n    return 0\n", encoding="utf-8")
+    store = SQLiteDataEngine(tmp_path / "history.sqlite3")
+    engine = XRayEngine(data_engine=store)
+
+    first = engine.scan(project, persist=True)
+    assert first.analyses["changes"]["status"] == "baseline_created"
+
+    source.write_text("def second():\n    return 2\n", encoding="utf-8")
+    deleted.unlink()
+    (project / "added.py").write_text("def added():\n    return 3\n", encoding="utf-8")
+    second = engine.scan(project, persist=True)
+
+    changes = second.analyses["changes"]
+    assert changes["status"] == "compared"
+    assert any(item["path"] == "main.py" for item in changes["modified"])
+    assert any(item["path"] == "added.py" for item in changes["added"])
+    assert any(item["path"] == "deleted.py" for item in changes["deleted"])
