@@ -13,12 +13,14 @@ from xray.storage.sqlite import SQLiteDataEngine
 from xray.web.server import create_dashboard_server
 
 
-def _request(server, path: str, method: str = "GET"):
+def _request(server, path: str, method: str = "GET", host_header: str | None = None):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     url = f"http://127.0.0.1:{server.server_port}{path}"
     try:
         request = urllib.request.Request(url, method=method)
+        if host_header is not None:
+            request.add_header("Host", host_header)
         try:
             with urllib.request.urlopen(request, timeout=3) as response:
                 return response.status, response.headers, response.read()
@@ -128,3 +130,26 @@ def test_dashboard_is_read_only_and_unknown_routes_are_not_found(tmp_path: Path)
 def test_dashboard_requires_a_report_or_database() -> None:
     with pytest.raises(ValueError, match="Provide"):
         create_dashboard_server(port=0)
+
+
+
+def test_dashboard_rejects_untrusted_host_header(tmp_path: Path) -> None:
+    project, database, _report = _history_fixture(tmp_path)
+    server = create_dashboard_server(database_path=database, project_root=project, port=0)
+    status, _headers, body = _request(
+        server, "/api/report", host_header="attacker.example"
+    )
+    assert status == 421
+    assert json.loads(body)["error"] == "Invalid local dashboard host."
+
+
+def test_dashboard_does_not_initialize_or_modify_empty_database(tmp_path: Path) -> None:
+    database = tmp_path / "empty.sqlite3"
+    database.write_bytes(b"")
+    server = create_dashboard_server(database_path=database, port=0)
+    status, _headers, body = _request(server, "/api/history")
+    assert status == 200
+    assert json.loads(body) == {
+        "scans": [], "runtimes": [], "repairs": [], "tests": []
+    }
+    assert database.read_bytes() == b""
