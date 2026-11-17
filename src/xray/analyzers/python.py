@@ -33,21 +33,11 @@ def analyze_python(path: Path, relative_path: str) -> tuple[list[Node], list[Edg
             qualified = ".".join([*self.scope, node.name])
             identifier = f"function:{relative_path}:{node.lineno}:{qualified}"
             nodes.append(Node(identifier, "function", qualified, relative_path, node.lineno))
-            parent = (
-                f"class:{relative_path}:{self._class_line(node)}:{self.scope[-1]}"
-                if self.scope else file_id
-            )
-            # Parent class line is resolved below; file containment remains explicit too.
             edges.append(Edge(file_id, identifier, "contains", Evidence(relative_path, node.lineno)))
             self.scope.append(node.name)
             self.generic_visit(node)
             self.scope.pop()
 
-        def _class_line(self, node: ast.AST) -> int:
-            for item in ast.walk(tree):
-                if isinstance(item, ast.ClassDef) and item.name == self.scope[-1]:
-                    return item.lineno
-            return 1
 
         def visit_Import(self, node: ast.Import) -> None:
             for alias in node.names:
