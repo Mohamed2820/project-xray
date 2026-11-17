@@ -182,8 +182,8 @@ class DashboardData:
             for key, (table, columns, order_column) in specs.items():
                 if not self._has_table(connection, table):
                     continue
-                # nosec B608: fixed SQL identifiers; all values are parameterized.
-                query = "SELECT " + columns + " FROM " + table
+                # The table and column names above are developer-defined constants.
+                query = "SELECT " + columns + " FROM " + table  # nosec B608
                 params: tuple[Any, ...] = ()
                 if self.project_root is not None:
                     query += " WHERE root = ?"
