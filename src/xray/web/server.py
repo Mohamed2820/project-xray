@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 import re
 import sqlite3
 import stat
@@ -119,12 +120,19 @@ class DashboardData:
         if path.is_symlink():
             raise ValueError("The report file must not be a symbolic link.")
         try:
-            metadata = path.stat()
-            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_REPORT_BYTES:
-                raise ValueError("The report file is not a supported regular file.")
-            payload = path.read_text(encoding="utf-8")
+            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+            flags |= getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(path, flags)
+            with os.fdopen(descriptor, "rb") as handle:
+                metadata = os.fstat(handle.fileno())
+                if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_REPORT_BYTES:
+                    raise ValueError("The report file is not a supported regular file.")
+                raw = handle.read(MAX_REPORT_BYTES + 1)
+            if len(raw) > MAX_REPORT_BYTES:
+                raise ValueError("The report file exceeds the configured size limit.")
+            payload = raw.decode("utf-8")
         except (OSError, UnicodeDecodeError):
-            raise ValueError("The report file could not be read.") from None
+            raise ValueError("The report file could not be read safely.") from None
         report = _decode_object(payload, MAX_REPORT_BYTES)
         if report is None:
             raise ValueError("The report file does not contain a valid JSON object.")
@@ -259,6 +267,11 @@ def create_dashboard_server(*, report_path: Path | None = None,
             self.wfile.write(body)
 
         def do_GET(self) -> None:
+            expected_host = f"{address}:{self.server.server_port}".lower()
+            actual_host = self.headers.get("Host", "").lower()
+            if actual_host != expected_host:
+                self._json(421, {"error": "Invalid local dashboard host."})
+                return
             if len(self.path) > 2048:
                 self._json(414, {"error": "Request path too long."})
                 return
