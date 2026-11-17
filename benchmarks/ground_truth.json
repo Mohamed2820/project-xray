@@ -1,0 +1,64 @@
+{
+  "projects": [
+    {
+      "id": "commerce_api",
+      "expected_findings": [
+        {"rule_id": "sensitive_assignment", "path": "src/config/credentials.py"},
+        {"rule_id": "possible_tainted_data_to_sql_query", "path": "src/api/handlers.py"},
+        {"rule_id": "possible_tainted_data_to_dynamic_code_execution", "path": "src/api/handlers.py"},
+        {"rule_id": "possible_tainted_data_to_command_execution", "path": "src/api/handlers.py"},
+        {"rule_id": "possible_tainted_data_to_outbound_http", "path": "src/api/handlers.py"},
+        {"rule_id": "dependency_known_advisory_match", "path": "poetry.lock"},
+        {"rule_id": "dependency_external_or_git_source", "path": "requirements.txt"}
+      ],
+      "expected_dependency_counts": {"direct": 2, "transitive": 2},
+      "expected_file_status": {"src/api/syntax_fault.py": "analysis_error"},
+      "expected_inventory_paths": [
+        "src/api/handlers.py",
+        "src/api/database.py",
+        "src/generated/schema_client.py",
+        "src/config/credentials.py"
+      ],
+      "expected_ast_calls": [{"path": "src/api/handlers.py", "name": "eval"}],
+      "expected_imports": [{"path": "src/api/handlers.py", "name": "api.database"}]
+    },
+    {
+      "id": "mobile_admin",
+      "expected_findings": [
+        {"rule_id": "android_permission_dangerous", "path": "AndroidManifest.xml"},
+        {"rule_id": "android_permission_special", "path": "AndroidManifest.xml"},
+        {"rule_id": "ci_broad_write_permissions", "path": ".github/workflows/release.yml"},
+        {"rule_id": "ci_pull_request_target_write_checkout", "path": ".github/workflows/release.yml"},
+        {"rule_id": "ci_action_not_sha_pinned", "path": ".github/workflows/release.yml"},
+        {"rule_id": "ci_inherited_secrets", "path": ".github/workflows/release.yml"}
+      ],
+      "expected_dependency_counts": {"direct": 0, "transitive": 0},
+      "expected_file_status": {},
+      "expected_inventory_paths": ["AndroidManifest.xml", ".github/workflows/release.yml"],
+      "expected_ast_calls": [],
+      "expected_imports": []
+    },
+    {
+      "id": "async_worker",
+      "expected_findings": [],
+      "expected_dependency_counts": {"direct": 1, "transitive": 1},
+      "expected_file_status": {},
+      "expected_inventory_paths": [
+        "src/runtime_probe.py",
+        "src/fake_transport.py",
+        "src/generated/queue_schema.py"
+      ],
+      "expected_ast_calls": [{"path": "src/runtime_probe.py", "name": "eval"}],
+      "expected_imports": [{"path": "src/runtime_probe.py", "name": "fake_transport"}]
+    }
+  ],
+  "known_gaps": [
+    {
+      "id": "cross_file_parameter_taint",
+      "project": "commerce_api",
+      "source_path": "src/api/handlers.py",
+      "sink_path": "src/api/database.py",
+      "description": "Request data is passed as a function argument into a SQL sink in another file. The current data-flow engine is intra-function and does not correlate this flow."
+    }
+  ]
+}
