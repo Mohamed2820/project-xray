@@ -93,6 +93,12 @@ class SQLiteDataEngine:
 
     def latest_report(self, root: str) -> dict[str, Any] | None:
         """Return the latest report for the exact normalized project root."""
+        if self.database_path.is_symlink():
+            raise ValueError("The SQLite database path must not be a symbolic link.")
+        if not self.database_path.exists():
+            return None
+        if not self.database_path.is_file():
+            raise ValueError("The SQLite database path must be a regular file.")
         self.initialize()
         with self._connect() as connection:
             row = connection.execute(

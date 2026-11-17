@@ -201,7 +201,7 @@ def _workflow_permissions(
 
     for number, line in enumerate(lines, start=1):
         match = re.match(
-            r"""^\s*uses\s*:\s*['"]?([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([^'"\s]+)""",
+            r"""^\s*(?:-\s*)?uses\s*:\s*['"]?([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([^'"\s]+)""",
             line,
         )
         if not match:

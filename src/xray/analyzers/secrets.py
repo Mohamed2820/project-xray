@@ -6,6 +6,7 @@ import re
 import stat
 from pathlib import Path
 
+from xray.analyzers.safe_io import read_project_bytes
 from xray.core.models import Evidence, Finding
 
 DEFAULT_MAX_BYTES = 1_000_000
@@ -78,11 +79,17 @@ def scan_secrets(
     path: Path,
     relative_path: str,
     max_bytes: int = DEFAULT_MAX_BYTES,
+    *,
+    root: Path | None = None,
 ) -> list[Finding]:
     """Return redacted, line-level findings from a bounded regular file."""
     if max_bytes < 1:
         raise ValueError("max_bytes must be positive")
-    content = _read_bounded_regular_file(path, max_bytes)
+    content = (
+        read_project_bytes(root, relative_path, max_bytes)
+        if root is not None
+        else _read_bounded_regular_file(path, max_bytes)
+    )
     if content is None:
         return []
     try:

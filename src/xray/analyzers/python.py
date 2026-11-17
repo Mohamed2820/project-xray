@@ -105,7 +105,7 @@ def analyze_python(
                     "return_annotation": (
                         _safe_symbol(node.returns) if node.returns is not None else None
                     ),
-                    "decorators": [_safe_unparse(item) for item in node.decorator_list],
+                    "decorators": [_safe_symbol(item) for item in node.decorator_list],
                     "async": isinstance(node, ast.AsyncFunctionDef),
                     "is_generator": any(
                         isinstance(item, (ast.Yield, ast.YieldFrom))
