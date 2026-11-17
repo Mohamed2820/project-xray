@@ -365,7 +365,7 @@ def _lock_dependencies(
     if nuget:
         try:
             lock = json.loads(nuget)
-            for project_name, project in lock.items():
+            for _project_name, project in lock.items():
                 if not isinstance(project, dict):
                     continue
                 for name, item in project.items():
