@@ -391,27 +391,44 @@ def _load_osv_exact_matches(
 ) -> tuple[dict[tuple[str, str, str], list[str]], bool]:
     if path is None:
         return {}, True
+    descriptor: int | None = None
     try:
         candidate = path.expanduser()
-        if candidate.is_symlink():
-            return {}, True
-        metadata = candidate.stat()
-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_OSV_BYTES:
-            return {}, True
+        before = os.lstat(candidate)
+        if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
+            return {}, False
+        if before.st_size > MAX_OSV_BYTES:
+            return {}, False
         flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
         flags |= getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(candidate, flags)
         with os.fdopen(descriptor, "rb") as handle:
+            descriptor = None
+            metadata = os.fstat(handle.fileno())
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_nlink != 1
+                or metadata.st_size > MAX_OSV_BYTES
+                or (metadata.st_dev, metadata.st_ino)
+                != (before.st_dev, before.st_ino)
+            ):
+                return {}, False
             raw = handle.read(MAX_OSV_BYTES + 1)
         if len(raw) > MAX_OSV_BYTES:
-            return {}, True
+            return {}, False
         data = json.loads(raw.decode("utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError):
-        return {}, True
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError):
+        return {}, False
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
     matches: dict[tuple[str, str, str], list[str]] = {}
     vulnerabilities = data.get("vulns", []) if isinstance(data, dict) else []
     if not isinstance(vulnerabilities, list):
-        return matches, True
+        return matches, False
     processed_versions = 0
     complete = True
     for vulnerability in vulnerabilities[:100_000]:
