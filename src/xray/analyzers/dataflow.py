@@ -324,9 +324,11 @@ def _module_indexes(
             elif isinstance(item, ast.Import):
                 for alias in item.names:
                     target_path = resolve_module(alias.name)
-                    local_name = alias.asname or alias.name
+                    local_name = alias.asname or alias.name.split(".", 1)[0]
                     if target_path:
-                        module_aliases[path][local_name] = alias.name
+                        module_aliases[path][local_name] = (
+                            alias.name if alias.asname else local_name
+                        )
                     elif "." in alias.name:
                         prefix, _separator, _tail = alias.name.rpartition(".")
                         target_path = resolve_module(prefix)
@@ -359,8 +361,10 @@ def analyze_data_flows(
     ]
     trees: dict[str, ast.Module] = {}
     indexed = 0
+    indexed_source_bytes = 0
     skipped = 0
     stopped = False
+    max_index_source_bytes = 16 * 1024 * 1024
 
     # First pass creates a compact project import/function index. The ASTs are
     # discarded after indexing so large projects do not retain every syntax tree.
@@ -375,6 +379,10 @@ def analyze_data_flows(
         if source is None:
             skipped += 1
             continue
+        source_bytes = len(source.encode("utf-8"))
+        if indexed_source_bytes + source_bytes > max_index_source_bytes:
+            stopped = True
+            break
         try:
             tree = ast.parse(source, filename=path)
         except (SyntaxError, RecursionError, ValueError):
@@ -382,6 +390,7 @@ def analyze_data_flows(
             continue
         trees[path] = tree
         indexed += 1
+        indexed_source_bytes += source_bytes
     functions, imports, module_aliases = _module_indexes(trees)
     del trees
 
@@ -421,12 +430,26 @@ def analyze_data_flows(
                 key=lambda item: len(item[0]),
                 reverse=True,
             ):
-                if expression.startswith(prefix + "."):
-                    function_name = expression[len(prefix) + 1 :]
-                    target_path = _module_path_lookup(module)
+                if not expression.startswith(prefix + "."):
+                    continue
+                remainder = expression[len(prefix) + 1 :].split(".")
+                if len(remainder) < 1:
+                    continue
+                # Resolve module.attribute.function for statically imported modules.
+                for module_parts in range(len(remainder) - 1, -1, -1):
+                    function_name = remainder[module_parts]
+                    if module_parts + 1 != len(remainder):
+                        continue
+                    module_name = (
+                        module if module_parts == 0
+                        else f"{module}.{'.'.join(remainder[:module_parts])}"
+                    )
+                    target_path = _module_path_lookup(module_name)
                     if target_path and function_name in functions.get(target_path, set()):
                         target = (target_path, function_name)
                         break
+                if target is not None:
+                    break
         if target is None or target in call_stack:
             return
         target_path, function_name = target
@@ -539,6 +562,8 @@ def analyze_data_flows(
         "status": "partial" if stopped else "analyzed",
         "python_files_analyzed": analyzed,
         "python_files_indexed": indexed,
+        "interprocedural_index_bytes": indexed_source_bytes,
+        "max_interprocedural_index_bytes": max_index_source_bytes,
         "python_files_skipped": skipped,
         "flow_count": len(flows),
         "interprocedural_flow_count": sum(bool(item.get("cross_file")) for item in flows),
