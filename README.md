@@ -14,13 +14,14 @@ Phases 1–4 provide:
 - Dependency risk indicators and optional exact-version matching against a user-supplied offline OSV JSON dataset.
 - Redacted credential detection.
 - Static Android manifest, GitHub Actions, Dockerfile, and selected Kubernetes/Compose permission and deployment checks.
-- Heuristic intra-function Python data-flow tracing from recognized input sources to sensitive sinks.
+- Bounded Python data-flow tracing within functions and across explicitly imported local top-level functions; dynamic dispatch and relative/dynamic imports are not fully resolved.
 - Explicit Markdown Architecture Decision Record (ADR) inventory.
 - SHA-256 file history and impact summaries between persisted X-Ray SQLite snapshots.
 - Python runtime collection for function calls/returns, selected process/network/filesystem/thread audit events, and exception stack traces.
 - Event chronology reconstruction, runtime-to-static component correlation, heuristic root-cause confidence, and affected caller-component summaries.
 - SQLite runtime sessions, repair-attempt records, and test-result history.
-- CI on Python 3.11–3.13 with Ruff, pytest, Bandit, and pip-audit.
+- Three-project controlled benchmark corpus covering vulnerable API handlers, Android/CI permissions, transitive dependencies, generated files, synthetic secrets, and a local runtime transport stub.
+- CI on Python 3.11–3.13 with Ruff, pytest, Bandit, pip-audit, and the project benchmark.
 
 The built-in semantic and runtime adapters currently support Python. The runtime adapter protocol is an extension point for future language-specific collectors; it does not imply those collectors are already implemented.
 
@@ -66,7 +67,7 @@ The options must appear before the project and script paths. Arguments after the
 
 The collector records Python function calls/returns and selected audit event categories. It records no function arguments, local-variable values, return values, environment variables, command arguments, stdout/stderr, file contents, or network payloads. Exception messages are redacted with the project's credential patterns; stack traces contain project-relative paths, line numbers, and function names, not source snippets.
 
-Default runtime limits: 10,000 events and 120 seconds. Maximums: 100,000 events and 600 seconds. The parent process terminates the runtime process group on timeout on POSIX systems; on Windows it terminates the observed process, and descendant cleanup is platform-dependent.
+Default runtime limits: 10,000 events and 120 seconds. Maximums: 100,000 events and 600 seconds. The parent discards child stdout/stderr and terminates remaining members of the runtime process group after normal exit and on timeout on POSIX systems. Windows terminates the observed process; complete descendant cleanup requires a Windows Job Object backend.
 
 List previous sessions:
 
@@ -131,6 +132,19 @@ dependencies, synthetic credentials, unsafe data flows, generated files, parse f
 and a safe stubbed runtime probe. Results report expected-positive coverage and known gaps;
 they do not claim precision or production security certification. See
 [benchmarks/README.md](benchmarks/README.md).
+
+
+## Security audit and hardening
+
+A six-stage code-level security review and its regression tests are documented in
+[docs/security-audit.md](docs/security-audit.md). The review hardened source-path
+validation, database placement, credential redaction, runtime child-process handling,
+dashboard content security policy, and dependency-advisory resource limits.
+
+The review's CI is evidence for the tested cases, not a claim that every vulnerability
+has been eliminated. Runtime tracing is **not a sandbox**, third-party plugins execute
+in-process as trusted code, Windows descendant cleanup remains limited, and production
+deployment security still requires environment-specific penetration testing.
 
 ## License
 

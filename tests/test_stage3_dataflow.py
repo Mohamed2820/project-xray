@@ -60,3 +60,67 @@ def test_extremely_deep_expression_is_skipped_without_crashing(tmp_path: Path) -
     assert edges == []
     assert findings == []
     assert summary["python_files_skipped"] == 1
+
+
+def test_taint_propagates_through_explicit_import_into_another_file(
+    tmp_path: Path,
+) -> None:
+    from xray.scanner import scan_project
+
+    project = tmp_path / "multi-module"
+    (project / "api").mkdir(parents=True)
+    (project / "api" / "__init__.py").write_text("", encoding="utf-8")
+    (project / "api" / "handlers.py").write_text(
+        "from api.database import write_user\n"
+        "import api.database\n"
+        "import api.database as db\n"
+        "def update(request, cursor):\n"
+        "    user_id = request.args.get('id')\n"
+        "    return write_user(cursor, user_id)\n"
+        "def update_module(request, cursor):\n"
+        "    user_id = request.args.get('module_id')\n"
+        "    return api.database.write_user(cursor, user_id)\n"
+        "def update_alias(request, cursor):\n"
+        "    user_id = request.args.get('alias_id')\n"
+        "    return db.write_user(cursor, user_id)\n",
+        encoding="utf-8",
+    )
+    (project / "api" / "database.py").write_text(
+        "def write_user(cursor, user_id):\n"
+        "    query = 'UPDATE users SET id = ' + user_id\n"
+        "    return cursor.execute(query)\n",
+        encoding="utf-8",
+    )
+
+    report = scan_project(project)
+    flows = report.analyses["data_flows"]["items"]
+
+    cross_file = [
+        flow for flow in flows
+        if flow.get("source_path") == "api/handlers.py"
+        and flow.get("sink_path") == "api/database.py"
+    ]
+    assert cross_file
+    assert all(flow["cross_file"] is True for flow in cross_file)
+    assert all(flow["confidence"] == "heuristic_interprocedural" for flow in cross_file)
+    assert any(
+        item.rule_id == "possible_tainted_data_to_sql_query"
+        and item.evidence.path == "api/database.py"
+        for item in report.findings
+    )
+
+
+def test_interprocedural_analysis_is_bounded_for_recursive_calls(tmp_path: Path) -> None:
+    from xray.scanner import scan_project
+
+    project = tmp_path / "recursive"
+    project.mkdir()
+    (project / "main.py").write_text(
+        "def recurse(value):\n"
+        "    return recurse(value)\n"
+        "def entry(request):\n"
+        "    return recurse(request.args.get('x'))\n",
+        encoding="utf-8",
+    )
+    report = scan_project(project)
+    assert report.analyses["data_flows"]["summary"]["max_interprocedural_depth"] == 8

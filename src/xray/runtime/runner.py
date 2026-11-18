@@ -131,6 +131,9 @@ def run_target(
             "sandboxed": False,
             "code_execution": True,
             "network_access_restricted": False,
+            "environment_filtered": (
+                os.environ.get("XRAY_RUNTIME_ENV_FILTERED") == "1"
+            ),
             "arguments_captured": False,
             "environment_captured": False,
             "stdout_stderr_captured": False,

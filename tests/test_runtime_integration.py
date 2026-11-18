@@ -117,3 +117,104 @@ def test_runtime_refuses_script_escape_and_report_symlink(tmp_path: Path) -> Non
     with pytest.raises(ValueError, match="symbolic link"):
         run_python_trace(report, project, "main.py", symlink)
     assert target.read_text(encoding="utf-8") == "keep-existing-content"
+
+
+def test_runtime_child_does_not_inherit_sensitive_environment_variables(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project = tmp_path / "environment-project"
+    project.mkdir()
+    marker = tmp_path / "environment-marker.txt"
+    monkeypatch.setenv("XRAY_AUDIT_TEST_API_TOKEN", "synthetic-private-value")
+    monkeypatch.setenv("XRAY_AUDIT_TEST_PASSWORD", "synthetic-password-value")
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path / "untrusted-pythonpath"))
+    script = project / "main.py"
+    script.write_text(
+        "import os\n"
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('|' .join(["
+        "os.getenv('XRAY_AUDIT_TEST_API_TOKEN', 'missing'), "
+        "os.getenv('XRAY_AUDIT_TEST_PASSWORD', 'missing'), "
+        "os.getenv('PYTHONPATH', 'missing')]))\n",
+        encoding="utf-8",
+    )
+    report = XRayEngine().scan(project)
+
+    runtime = run_python_trace(
+        report, project, "main.py", tmp_path / "environment-report.json",
+        max_events=200, max_seconds=10,
+    )
+
+    assert runtime["status"] == "success"
+    assert marker.read_text(encoding="utf-8") == "missing|missing|missing"
+    assert runtime["execution"]["environment_filtered"] is True
+    assert runtime["execution"]["sensitive_environment_variables_removed"] >= 2
+    assert "synthetic-private-value" not in json.dumps(runtime)
+    assert "synthetic-password-value" not in json.dumps(runtime)
+
+
+def test_runtime_trace_terminates_background_descendants_on_posix(
+    tmp_path: Path,
+) -> None:
+    import os
+    import time
+
+    import pytest
+
+    if os.name == "nt":
+        pytest.skip("Windows process-tree cleanup requires a Job Object backend.")
+
+    project = tmp_path / "descendant-project"
+    project.mkdir()
+    started = tmp_path / "descendant-started.txt"
+    finished = tmp_path / "descendant-finished.txt"
+    script = project / "main.py"
+    child_code = (
+        "from pathlib import Path; import time; "
+        f"Path({str(started)!r}).write_text('started'); "
+        "time.sleep(0.6); "
+        f"Path({str(finished)!r}).write_text('finished')"
+    )
+    script.write_text(
+        "import subprocess, sys, time\n"
+        f"subprocess.Popen([sys.executable, '-c', {child_code!r}])\n"
+        "deadline = time.monotonic() + 2\n"
+        f"while not __import__('pathlib').Path({str(started)!r}).exists():\n"
+        "    if time.monotonic() > deadline:\n"
+        "        raise TimeoutError('descendant did not start')\n"
+        "    time.sleep(0.01)\n",
+        encoding="utf-8",
+    )
+    report = XRayEngine().scan(project)
+
+    runtime = run_python_trace(
+        report, project, "main.py", tmp_path / "descendant-report.json",
+        max_events=300, max_seconds=10,
+    )
+    time.sleep(0.7)
+
+    assert runtime["status"] == "success"
+    assert started.exists()
+    assert not finished.exists()
+
+
+def test_child_report_loader_rejects_symlinks_and_hard_links(tmp_path: Path) -> None:
+    import pytest
+
+    from xray.runtime.session import _load_child_report
+
+    target = tmp_path / "target.json"
+    target.write_text('{"status":"success"}', encoding="utf-8")
+    symlink = tmp_path / "child-report-link.json"
+    try:
+        symlink.symlink_to(target)
+    except OSError:
+        pytest.skip("Symlinks are not available on this platform.")
+    assert _load_child_report(symlink) is None
+
+    hard_link = tmp_path / "child-report-hardlink.json"
+    try:
+        hard_link.hardlink_to(target)
+    except OSError:
+        pytest.skip("Hard links are not available on this platform.")
+    assert _load_child_report(hard_link) is None

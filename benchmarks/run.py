@@ -106,6 +106,10 @@ def run_benchmarks() -> dict[str, Any]:
                 "graph_integrity_errors": report.coverage.get("graph_integrity_errors", []),
                 "file_count": len(report.files),
                 "finding_count": len(report.findings),
+                "interprocedural_flow_count": sum(
+                    bool(flow.get("cross_file"))
+                    for flow in report.analyses.get("data_flows", {}).get("items", [])
+                ),
             })
 
         known_gaps: list[dict[str, Any]] = []

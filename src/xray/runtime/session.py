@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
+import stat
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 import uuid
@@ -21,6 +24,43 @@ from xray.storage.sqlite import SQLiteDataEngine
 
 MAX_RUNTIME_REPORT_BYTES = 20 * 1024 * 1024
 BOOTSTRAP = "from xray.runtime.runner import main; raise SystemExit(main())"
+_SENSITIVE_ENV_NAME = re.compile(
+    r"(?:^|[_-])(?:TOKEN|SECRET|PASSWORD|PASSWD|API[_-]?(?:KEY|TOKEN)|"
+    r"ACCESS[_-]?KEY|CREDENTIALS?|AUTHORIZATION|COOKIE|PRIVATE[_-]?KEY|"
+    r"DATABASE[_-]?(?:URL|URI|DSN)|CONNECTION[_-]?STRING|DSN)(?:$|[_-])",
+    re.IGNORECASE,
+)
+_UNSAFE_PYTHON_ENV = frozenset({
+    "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONINSPECT",
+    "PYTHONUSERBASE", "PYTHONBREAKPOINT", "LD_PRELOAD", "LD_AUDIT",
+    "DYLD_INSERT_LIBRARIES", "DYLD_FRAMEWORK_PATH",
+    "DYLD_FALLBACK_FRAMEWORK_PATH", "DYLD_FALLBACK_LIBRARY_PATH",
+})
+
+
+def _runtime_environment() -> tuple[dict[str, str], int]:
+    """Remove common credential variables and Python/native loader injection knobs."""
+    filtered: dict[str, str] = {}
+    removed_secrets = 0
+    for key, value in os.environ.items():
+        normalized = key.upper()
+        if normalized in _UNSAFE_PYTHON_ENV:
+            continue
+        if _SENSITIVE_ENV_NAME.search(key):
+            removed_secrets += 1
+            continue
+        filtered[key] = value
+    # setup-python and some relocatable interpreters rely on the configured
+    # Python library directory. Never inherit a caller-controlled loader path.
+    library_dir = sysconfig.get_config_var("LIBDIR")
+    if isinstance(library_dir, str) and Path(library_dir).is_dir():
+        loader_key = "DYLD_LIBRARY_PATH" if sys.platform == "darwin" else "LD_LIBRARY_PATH"
+        filtered[loader_key] = library_dir
+    filtered["PYTHONDONTWRITEBYTECODE"] = "1"
+    filtered["PYTHONNOUSERSITE"] = "1"
+    filtered["PYTHONSAFEPATH"] = "1"
+    filtered["XRAY_RUNTIME_ENV_FILTERED"] = "1"
+    return filtered, removed_secrets
 
 
 def _validate_output(root: Path, destination: Path) -> Path:
@@ -36,14 +76,38 @@ def _validate_output(root: Path, destination: Path) -> Path:
 
 
 def _load_child_report(path: Path) -> dict[str, Any] | None:
+    """Read the child report through one verified, no-follow file descriptor."""
+    descriptor: int | None = None
     try:
-        if path.is_symlink() or not path.is_file():
+        before = os.lstat(path)
+        if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
             return None
-        if path.stat().st_size > MAX_RUNTIME_REPORT_BYTES:
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags)
+        with os.fdopen(descriptor, "rb") as handle:
+            descriptor = None
+            metadata = os.fstat(handle.fileno())
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or stat.S_ISLNK(metadata.st_mode)
+                or metadata.st_nlink != 1
+                or metadata.st_size > MAX_RUNTIME_REPORT_BYTES
+                or (metadata.st_dev, metadata.st_ino)
+                != (before.st_dev, before.st_ino)
+            ):
+                return None
+            raw = handle.read(MAX_RUNTIME_REPORT_BYTES + 1)
+        if len(raw) > MAX_RUNTIME_REPORT_BYTES:
             return None
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+        value = json.loads(raw.decode("utf-8"))
+    except (
+        OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError
+    ):
         return None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
     return value if isinstance(value, dict) else None
 
 
@@ -205,6 +269,8 @@ def run_python_trace(
             process_options: dict[str, Any] = {
                 "cwd": project_root,
                 "stdin": subprocess.DEVNULL,
+                "stdout": subprocess.DEVNULL,
+                "stderr": subprocess.DEVNULL,
                 "shell": False,
             }
             if os.name == "nt":
@@ -213,10 +279,20 @@ def run_python_trace(
                 )
             else:
                 process_options["start_new_session"] = True
+            runtime_env, removed_sensitive_environment_variables = _runtime_environment()
+            process_options["env"] = runtime_env
             process = subprocess.Popen(command, **process_options)
             process_id = process.pid
             try:
                 exit_code = process.wait(timeout=max_seconds + 2.0)
+                if os.name != "nt":
+                    # The target may leave daemon children behind after its main
+                    # process exits. Terminate the isolated process group before
+                    # reading the child report or returning control to the caller.
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
             except subprocess.TimeoutExpired:
                 timed_out = True
                 if os.name == "nt":
@@ -310,6 +386,10 @@ def run_python_trace(
             "sandboxed": False,
             "code_execution": True,
             "network_access_restricted": False,
+            "environment_filtered": True,
+            "sensitive_environment_variables_removed": (
+                removed_sensitive_environment_variables
+            ),
             "arguments_captured": False,
             "environment_captured": False,
             "stdout_stderr_captured": False,

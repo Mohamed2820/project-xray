@@ -95,6 +95,8 @@ def test_osv_symlink_input_is_rejected(tmp_path: Path) -> None:
     items, _, _, _, summary = analyze_dependencies(root, osv_database=link)
     assert items
     assert summary["advisory_matches"] == 0
+    assert summary["status"] == "partial"
+    assert summary["osv_dataset_complete"] is False
 
 
 
@@ -149,3 +151,64 @@ def test_editable_vcs_requirement_is_identified_and_url_redacted(tmp_path: Path)
     assert "external_or_git_source" in items[0]["risk_flags"]
     assert "private-password" not in repr(items)
     assert "user:private-password" not in repr(items)
+
+
+def test_osv_matching_stops_at_expired_deadline(tmp_path: Path) -> None:
+    import time
+
+    from xray.analyzers.dependencies import _load_osv_exact_matches
+
+    osv = tmp_path / "osv.json"
+    osv.write_text(
+        json.dumps({
+            "vulns": [{
+                "id": "XRAY-TEST-1",
+                "affected": [{
+                    "package": {"ecosystem": "PyPI", "name": "sample"},
+                    "versions": ["1.0"],
+                }],
+            }],
+        }),
+        encoding="utf-8",
+    )
+    matches, complete = _load_osv_exact_matches(
+        osv, 1_000_000, deadline=time.monotonic() - 1
+    )
+
+    assert matches == {}
+    assert complete is False
+
+
+def test_dependency_analysis_reports_expired_scan_budget(tmp_path: Path) -> None:
+    import time
+
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\ndependencies = ["sample==1.0"]\n',
+        encoding="utf-8",
+    )
+    _items, _nodes, _edges, _findings, summary = analyze_dependencies(
+        tmp_path, deadline=time.monotonic() - 1
+    )
+
+    assert summary["status"] == "partial"
+    assert summary["deadline_reached"] is True
+
+
+def test_osv_hard_link_input_is_rejected_as_incomplete(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    target = tmp_path / "osv.json"
+    target.write_text('{"vulns":[]}', encoding="utf-8")
+    link = tmp_path / "osv-hardlink.json"
+    try:
+        link.hardlink_to(target)
+    except OSError:
+        import pytest
+        pytest.skip("Hard links are not available on this platform.")
+    (_items, _nodes, _edges, _findings, summary) = analyze_dependencies(
+        root, osv_database=link
+    )
+
+    assert summary["status"] == "partial"
+    assert summary["osv_dataset_complete"] is False
+    assert summary["advisory_matches"] == 0

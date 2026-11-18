@@ -8,48 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from xray.analyzers.safe_io import read_project_text
-
-_SENSITIVE_ASSIGNMENT = re.compile(
-    r"""(?ix)\b(
-        api[_-]?key|github[_-]?token|stripe[_-]?secret[_-]?key|
-        aws[_-]?secret[_-]?access[_-]?key|access[_-]?token|
-        refresh[_-]?token|client[_-]?secret|secret(?:[_-]?key)?|
-        password|passwd|passphrase|private[_-]?key|credential|token|
-        database[_-]?(?:url|uri)|connection[_-]?string|authorization
-    )\b(\s*[:=]\s*)["']?([^\s"' ,;]+)"""
-)
-_TOKEN_PATTERNS = (
-    re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b"),
-    re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"),
-    re.compile(r"\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}\b"),
-    re.compile(r"\bAIza[0-9A-Za-z_-]{30,}\b"),
-    re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b"),
-)
+from xray.analyzers.secrets import redact_sensitive_text
 
 
 def _redact(text: str) -> str:
-    result = re.sub(
-        r"(?im)(-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----)"
-        r".*?(-----END (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----)",
-        r"\1[REDACTED]\2",
-        text,
-        flags=re.DOTALL,
-    )
-    result = re.sub(
-        r"(?i)(authorization\s*[:=]\s*Bearer\s+)[A-Za-z0-9._~+/-]+",
-        r"\1[REDACTED]",
-        result,
-    )
-    result = re.sub(r"(?i)(https?://)[^/@\s]+@", r"\1[REDACTED]@", result)
-    result = re.sub(
-        r"(?i)([?&](?:token|access_token|api_key|password|secret)=)[^&\s]+",
-        r"\1[REDACTED]",
-        result,
-    )
-    result = _SENSITIVE_ASSIGNMENT.sub(r"\1\2[REDACTED]", result)
-    for pattern in _TOKEN_PATTERNS:
-        result = pattern.sub("[REDACTED_TOKEN]", result)
-    return result
+    """Use the shared credential redactor so analyzer output cannot diverge."""
+    return redact_sensitive_text(text)
 
 
 def analyze_decisions(

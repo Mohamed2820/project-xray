@@ -6,7 +6,7 @@ import math
 import os
 import stat
 import time
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from xray.analyzers.dataflow import analyze_data_flows
 from xray.analyzers.decisions import analyze_decisions
@@ -90,17 +90,34 @@ class ProjectScanner:
     @staticmethod
     def _entry_is_safe(connector: ProjectConnector, entry: object) -> bool:
         try:
-            relative = PurePosixPath(entry.relative_path)  # type: ignore[attr-defined]
-            if relative.is_absolute() or not relative.parts or ".." in relative.parts:
-                return False
+            relative_value = entry.relative_path  # type: ignore[attr-defined]
             path = entry.path  # type: ignore[attr-defined]
+            if not isinstance(relative_value, str) or not isinstance(path, Path):
+                return False
+            windows = PureWindowsPath(relative_value)
+            relative = PurePosixPath(relative_value)
+            if (
+                "\\" in relative_value
+                or "\x00" in relative_value
+                or windows.is_absolute()
+                or bool(windows.drive)
+                or relative.is_absolute()
+                or not relative.parts
+                or ".." in relative.parts
+            ):
+                return False
             metadata = path.lstat()
             if not stat.S_ISREG(metadata.st_mode):
                 return False
+            root = connector.root.resolve(strict=True)
             resolved = path.resolve(strict=True)
-            resolved.relative_to(connector.root.resolve(strict=True))
-            return metadata.st_size == entry.size_bytes  # type: ignore[attr-defined]
-        except (AttributeError, OSError, ValueError):
+            resolved.relative_to(root)
+            actual_relative = resolved.relative_to(root).as_posix()
+            return (
+                actual_relative == relative_value
+                and metadata.st_size == entry.size_bytes  # type: ignore[attr-defined]
+            )
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
             return False
 
     def scan(self, connector: ProjectConnector) -> ScanReport:
@@ -110,6 +127,7 @@ class ProjectScanner:
         file_count = 0
         total_bytes = 0
         hash_failures = 0
+        unsafe_entries = 0
         limit_reason: str | None = None
 
         for entry in connector.iter_files():
@@ -120,6 +138,14 @@ class ProjectScanner:
                 limit_reason = "max_files"
                 break
             file_count += 1
+            if not self._entry_is_safe(connector, entry):
+                # Do not publish a path/size supplied by a connector until its
+                # canonical in-root regular-file identity has been verified.
+                unsafe_entries += 1
+                hash_failures += 1
+                if not limit_reason:
+                    limit_reason = "unsafe_or_changed_connector_entry"
+                continue
             record = {
                 "path": entry.relative_path,
                 "size_bytes": entry.size_bytes,
@@ -141,11 +167,6 @@ class ProjectScanner:
                 limit_reason = "max_total_bytes"
                 break
             total_bytes += entry.size_bytes
-            if not self._entry_is_safe(connector, entry):
-                record["status"] = "changed_or_unsafe_file"
-                hash_failures += 1
-                continue
-
             record["sha256"] = _sha256_file(
                 connector.root, entry.relative_path,
                 self.max_total_bytes, deadline,
@@ -202,9 +223,12 @@ class ProjectScanner:
         # max_file_bytes. These analyzers only read data; they never install or run it.
         dependency_records, dependency_nodes, dependency_edges, dependency_findings, dep_summary = (
             analyze_dependencies(
-                connector.root, self.max_file_bytes, self.osv_database
+                connector.root, self.max_file_bytes, self.osv_database,
+                deadline=deadline,
             )
         )
+        if dep_summary.get("status") == "partial" and not limit_reason:
+            limit_reason = "dependency_analysis_budget"
         known_file_ids = {
             node.id for node in report.nodes if node.kind == "file"
         }
@@ -287,6 +311,7 @@ class ProjectScanner:
             "files_seen": file_count,
             "bytes_considered": total_bytes,
             "hash_failures": hash_failures,
+            "unsafe_connector_entries": unsafe_entries,
             "change_hash_coverage": "partial" if hash_failures else "complete",
             "limits": {
                 "max_file_bytes": self.max_file_bytes,

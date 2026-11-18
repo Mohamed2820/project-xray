@@ -42,12 +42,15 @@ class XRayEngine:
         else:
             raise TypeError("source must be a path or a ProjectConnector")
 
-        if persist:
-            if self.data_engine is None:
-                raise ValueError("persist=True requires a configured data engine")
+        if persist and self.data_engine is None:
+            raise ValueError("persist=True requires a configured data engine")
+
+        # latest_report() initializes/migrates the database even when persist=False.
+        # Therefore *any* configured history database must be outside the source tree.
+        if self.data_engine is not None:
             database = self.data_engine.database_path.resolve()
             try:
-                database.relative_to(connector.root)
+                database.relative_to(connector.root.resolve())
             except ValueError:
                 pass
             else:

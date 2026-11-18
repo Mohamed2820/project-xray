@@ -3,17 +3,26 @@ from __future__ import annotations
 
 import os
 import stat
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import BinaryIO
 
 
 def _validated_parts(relative_path: str) -> tuple[str, ...] | None:
+    # X-Ray paths are canonical POSIX-relative paths. Reject Windows separators
+    # and drive-qualified forms too, even when running on POSIX, so an artifact
+    # created on one platform cannot become traversal on another.
     relative = PurePosixPath(relative_path)
+    windows = PureWindowsPath(relative_path)
     if (
-        relative.is_absolute()
+        "\\" in relative_path
+        or "\x00" in relative_path
+        or windows.is_absolute()
+        or bool(windows.drive)
+        or relative.is_absolute()
         or not relative.parts
         or ".." in relative.parts
         or any(part in {"", "."} for part in relative.parts)
+        or (os.name == "nt" and any(":" in part for part in relative.parts))
     ):
         return None
     return relative.parts
@@ -51,7 +60,7 @@ def _open_beneath(root_path: Path, parts: tuple[str, ...]) -> int:
             raise OSError("Symbolic links are not allowed in scanned project paths.")
     try:
         candidate.resolve(strict=True).relative_to(root_path)
-    except (OSError, ValueError):
+    except (OSError, RuntimeError, ValueError):
         raise OSError("Path escaped the project root.") from None
     return os.open(candidate, base_flags | nofollow)
 
@@ -70,7 +79,7 @@ def open_project_file(root: Path, relative_path: str) -> BinaryIO | None:
             handle.close()
             return None
         return handle
-    except OSError:
+    except (OSError, RuntimeError, ValueError):
         if handle is not None:
             handle.close()
         return None

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from xray.analyzers.safe_io import read_project_bytes, read_project_text
 
 
@@ -35,3 +37,25 @@ def test_read_project_bytes_rejects_final_symlink(tmp_path: Path) -> None:
     (root / "alias.txt").symlink_to(outside)
 
     assert read_project_bytes(root, "alias.txt", 1024) is None
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        r"..\\outside.txt",
+        r"folder\\..\\outside.txt",
+        r"C:\\Windows\\win.ini",
+        r"\\\\server\\share\\secret.txt",
+    ],
+)
+def test_rejects_windows_path_traversal_on_all_platforms(
+    tmp_path: Path, relative_path: str
+) -> None:
+    from xray.analyzers.safe_io import read_project_bytes
+
+    root = tmp_path / "project"
+    root.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("must-not-be-read", encoding="utf-8")
+
+    assert read_project_bytes(root, relative_path, 1024) is None

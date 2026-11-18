@@ -17,10 +17,8 @@ def test_phase_six_benchmark_matches_controlled_ground_truth() -> None:
     assert result["expected_positive_coverage_percent"] == 100.0
     assert result["precision_measured"] is False
 
-    # Keep known gaps visible; do not silently count unsupported analysis as a pass.
-    assert result["known_gaps"]
-    assert result["known_gaps"][0]["id"] == "cross_file_parameter_taint"
-    assert result["known_gaps"][0]["status"] in {"not_detected", "detected"}
+    commerce = next(item for item in result["projects"] if item["project"] == "commerce_api")
+    assert commerce["interprocedural_flow_count"] >= 1
 
     runtime = result["runtime_probe"]
     assert runtime["status"] == "success"
