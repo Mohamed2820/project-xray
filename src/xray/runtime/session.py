@@ -244,6 +244,8 @@ def run_python_trace(
             process_options: dict[str, Any] = {
                 "cwd": project_root,
                 "stdin": subprocess.DEVNULL,
+                "stdout": subprocess.DEVNULL,
+                "stderr": subprocess.DEVNULL,
                 "shell": False,
             }
             if os.name == "nt":
@@ -258,6 +260,14 @@ def run_python_trace(
             process_id = process.pid
             try:
                 exit_code = process.wait(timeout=max_seconds + 2.0)
+                if os.name != "nt":
+                    # The target may leave daemon children behind after its main
+                    # process exits. Terminate the isolated process group before
+                    # reading the child report or returning control to the caller.
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
             except subprocess.TimeoutExpired:
                 timed_out = True
                 if os.name == "nt":
