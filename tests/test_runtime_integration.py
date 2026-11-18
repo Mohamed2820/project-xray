@@ -151,3 +151,48 @@ def test_runtime_child_does_not_inherit_sensitive_environment_variables(
     assert runtime["execution"]["sensitive_environment_variables_removed"] >= 2
     assert "synthetic-private-value" not in json.dumps(runtime)
     assert "synthetic-password-value" not in json.dumps(runtime)
+
+
+def test_runtime_trace_terminates_background_descendants_on_posix(
+    tmp_path: Path,
+) -> None:
+    import os
+    import time
+
+    import pytest
+
+    if os.name == "nt":
+        pytest.skip("Windows process-tree cleanup requires a Job Object backend.")
+
+    project = tmp_path / "descendant-project"
+    project.mkdir()
+    started = tmp_path / "descendant-started.txt"
+    finished = tmp_path / "descendant-finished.txt"
+    script = project / "main.py"
+    child_code = (
+        "from pathlib import Path; import time; "
+        f"Path({str(started)!r}).write_text('started'); "
+        "time.sleep(0.6); "
+        f"Path({str(finished)!r}).write_text('finished')"
+    )
+    script.write_text(
+        "import subprocess, sys, time\n"
+        f"subprocess.Popen([sys.executable, '-c', {child_code!r}])\n"
+        "deadline = time.monotonic() + 2\n"
+        f"while not __import__('pathlib').Path({str(started)!r}).exists():\n"
+        "    if time.monotonic() > deadline:\n"
+        "        raise TimeoutError('descendant did not start')\n"
+        "    time.sleep(0.01)\n",
+        encoding="utf-8",
+    )
+    report = XRayEngine().scan(project)
+
+    runtime = run_python_trace(
+        report, project, "main.py", tmp_path / "descendant-report.json",
+        max_events=300, max_seconds=10,
+    )
+    time.sleep(0.7)
+
+    assert runtime["status"] == "success"
+    assert started.exists()
+    assert not finished.exists()
