@@ -117,3 +117,37 @@ def test_runtime_refuses_script_escape_and_report_symlink(tmp_path: Path) -> Non
     with pytest.raises(ValueError, match="symbolic link"):
         run_python_trace(report, project, "main.py", symlink)
     assert target.read_text(encoding="utf-8") == "keep-existing-content"
+
+
+def test_runtime_child_does_not_inherit_sensitive_environment_variables(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project = tmp_path / "environment-project"
+    project.mkdir()
+    marker = tmp_path / "environment-marker.txt"
+    monkeypatch.setenv("XRAY_AUDIT_TEST_API_TOKEN", "synthetic-private-value")
+    monkeypatch.setenv("XRAY_AUDIT_TEST_PASSWORD", "synthetic-password-value")
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path / "untrusted-pythonpath"))
+    script = project / "main.py"
+    script.write_text(
+        "import os\\n"
+        "from pathlib import Path\\n"
+        f"Path({str(marker)!r}).write_text('|' .join(["
+        "os.getenv('XRAY_AUDIT_TEST_API_TOKEN', 'missing'), "
+        "os.getenv('XRAY_AUDIT_TEST_PASSWORD', 'missing'), "
+        "os.getenv('PYTHONPATH', 'missing')]))\\n",
+        encoding="utf-8",
+    )
+    report = XRayEngine().scan(project)
+
+    runtime = run_python_trace(
+        report, project, "main.py", tmp_path / "environment-report.json",
+        max_events=200, max_seconds=10,
+    )
+
+    assert runtime["status"] == "success"
+    assert marker.read_text(encoding="utf-8") == "missing|missing|missing"
+    assert runtime["execution"]["environment_filtered"] is True
+    assert runtime["execution"]["sensitive_environment_variables_removed"] >= 2
+    assert "synthetic-private-value" not in json.dumps(runtime)
+    assert "synthetic-password-value" not in json.dumps(runtime)
