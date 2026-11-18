@@ -20,6 +20,7 @@ MAX_HISTORY_ITEMS = 100
 MAX_DASHBOARD_THREADS = 16
 SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 HTML_FILE = Path(__file__).with_name("index.html")
+JS_FILE = Path(__file__).with_name("app.js")
 
 
 def _validate_file(path: Path | None, label: str,
@@ -297,7 +298,7 @@ def create_dashboard_server(*, report_path: Path | None = None,
             self.send_header("Cache-Control", "no-store")
             self.send_header(
                 "Content-Security-Policy",
-                "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+                "default-src 'self'; script-src 'self'; "
                 "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
                 "connect-src 'self'; object-src 'none'; base-uri 'none'; "
                 "frame-ancestors 'none'; form-action 'none'",
@@ -344,6 +345,10 @@ def create_dashboard_server(*, report_path: Path | None = None,
             try:
                 if path == "/":
                     self._send(200, HTML_FILE.read_bytes(), "text/html; charset=utf-8")
+                elif path == "/app.js":
+                    self._send(
+                        200, JS_FILE.read_bytes(), "application/javascript; charset=utf-8"
+                    )
                 elif path == "/api/health":
                     self._json(200, {
                         "status": "ok",
