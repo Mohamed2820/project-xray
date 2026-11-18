@@ -156,3 +156,27 @@ def test_dashboard_does_not_initialize_or_modify_empty_database(tmp_path: Path) 
         "scans": [], "runtimes": [], "repairs": [], "tests": []
     }
     assert database.read_bytes() == original_bytes
+
+
+def test_dashboard_history_text_fields_are_bounded(tmp_path: Path) -> None:
+    project, database, _report = _history_fixture(tmp_path)
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "INSERT INTO repair_attempts VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("repair-large", str(project.resolve()), None, "2026-11-18",
+             "S" * 10000, "applied", "[]"),
+        )
+        connection.execute(
+            "INSERT INTO test_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("test-large", str(project.resolve()), None, None, "2026-11-18",
+             "C" * 10000, 0, 1, "T" * 10000),
+        )
+
+    server = create_dashboard_server(database_path=database, project_root=project, port=0)
+    status, _headers, body = _request(server, "/api/history")
+    payload = json.loads(body)
+
+    assert status == 200
+    assert len(payload["repairs"][0]["summary"]) <= 4000
+    assert len(payload["tests"][0]["command"]) <= 2000
+    assert len(payload["tests"][0]["summary"]) <= 4000
