@@ -14,8 +14,8 @@ def _validated_parts(relative_path: str) -> tuple[str, ...] | None:
     relative = PurePosixPath(relative_path)
     windows = PureWindowsPath(relative_path)
     if (
-        "\\\\" in relative_path
-        or "\\x00" in relative_path
+        "\\" in relative_path
+        or "\x00" in relative_path
         or windows.is_absolute()
         or bool(windows.drive)
         or relative.is_absolute()
