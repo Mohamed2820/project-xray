@@ -318,8 +318,8 @@ def _module_indexes(
                     local_name = alias.asname or alias.name
                     if target_path and alias.name in functions.get(target_path, set()):
                         imports[path][local_name] = (target_path, alias.name)
-                    nested_module = resolve_module(f"{item.module}.{alias.name}")
-                    if nested_module:
+                    nested_module = f"{item.module}.{alias.name}"
+                    if resolve_module(nested_module):
                         module_aliases[path][local_name] = nested_module
             elif isinstance(item, ast.Import):
                 for alias in item.names:
@@ -384,34 +384,6 @@ def analyze_data_flows(
         indexed += 1
     functions, imports, module_aliases = _module_indexes(trees)
     del trees
-
-    def resolve_target(caller_path: str, function_expression: ast.AST) -> tuple[str, str] | None:
-        expression = _name(function_expression)
-        if isinstance(function_expression, ast.Name):
-            imported = imports.get(caller_path, {}).get(function_expression.id)
-            if imported:
-                return imported
-            if function_expression.id in functions.get(caller_path, set()):
-                return caller_path, function_expression.id
-            return None
-        for prefix, module in sorted(
-            module_aliases.get(caller_path, {}).items(),
-            key=lambda item: len(item[0]),
-            reverse=True,
-        ):
-            if expression.startswith(prefix + "."):
-                function_name = expression[len(prefix) + 1 :]
-                target_path = next(
-                    (
-                        path for path, module_functions in functions.items()
-                        if path == _module_path(module, functions, module_aliases)
-                        and function_name in module_functions
-                    ),
-                    None,
-                )
-                if target_path:
-                    return target_path, function_name
-        return None
 
     module_paths: dict[str, str] = {}
     for path, tree_names in functions.items():
@@ -480,6 +452,7 @@ def analyze_data_flows(
         parameters = [
             *function_node.args.posonlyargs,
             *function_node.args.args,
+            *function_node.args.kwonlyargs,
         ]
         initial: dict[str, set[str]] = {}
         for index, parameter in enumerate(parameters):
@@ -584,16 +557,3 @@ def analyze_data_flows(
     }
     return flows, nodes, edges, findings, summary
 
-
-def _module_path(
-    module: str,
-    functions: dict[str, set[str]],
-    _module_aliases: dict[str, dict[str, str]],
-) -> str | None:
-    dotted = module.replace(".", "/")
-    candidates = (f"{dotted}.py", f"{dotted}/__init__.py",
-                  f"src/{dotted}.py", f"src/{dotted}/__init__.py")
-    return next(
-        (path for path in candidates if path in functions),
-        None,
-    )
