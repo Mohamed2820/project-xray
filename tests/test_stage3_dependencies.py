@@ -95,6 +95,8 @@ def test_osv_symlink_input_is_rejected(tmp_path: Path) -> None:
     items, _, _, _, summary = analyze_dependencies(root, osv_database=link)
     assert items
     assert summary["advisory_matches"] == 0
+    assert summary["status"] == "partial"
+    assert summary["osv_dataset_complete"] is False
 
 
 
@@ -190,3 +192,23 @@ def test_dependency_analysis_reports_expired_scan_budget(tmp_path: Path) -> None
 
     assert summary["status"] == "partial"
     assert summary["deadline_reached"] is True
+
+
+def test_osv_hard_link_input_is_rejected_as_incomplete(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    target = tmp_path / "osv.json"
+    target.write_text('{"vulns":[]}', encoding="utf-8")
+    link = tmp_path / "osv-hardlink.json"
+    try:
+        link.hardlink_to(target)
+    except OSError:
+        import pytest
+        pytest.skip("Hard links are not available on this platform.")
+    (_items, _nodes, _edges, _findings, summary) = analyze_dependencies(
+        root, osv_database=link
+    )
+
+    assert summary["status"] == "partial"
+    assert summary["osv_dataset_complete"] is False
+    assert summary["advisory_matches"] == 0
