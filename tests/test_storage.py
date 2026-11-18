@@ -75,3 +75,19 @@ def test_engine_compares_successive_scan_snapshots(tmp_path: Path) -> None:
     assert any(item["path"] == "main.py" for item in changes["modified"])
     assert any(item["path"] == "added.py" for item in changes["added"])
     assert any(item["path"] == "deleted.py" for item in changes["deleted"])
+
+
+def test_history_database_inside_project_is_rejected_even_without_persist(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "main.py").write_text("def main():\\n    return 1\\n", encoding="utf-8")
+    database = project / ".xray" / "history.sqlite3"
+    engine = XRayEngine(data_engine=SQLiteDataEngine(database))
+
+    with pytest.raises(ValueError, match="outside the scanned project"):
+        engine.scan(project, persist=False)
+
+    assert not database.exists()
+    assert not database.parent.exists()
