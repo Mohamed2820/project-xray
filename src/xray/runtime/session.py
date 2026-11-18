@@ -243,6 +243,8 @@ def run_python_trace(
                 )
             else:
                 process_options["start_new_session"] = True
+            runtime_env, removed_sensitive_environment_variables = _runtime_environment()
+            process_options["env"] = runtime_env
             process = subprocess.Popen(command, **process_options)
             process_id = process.pid
             try:
