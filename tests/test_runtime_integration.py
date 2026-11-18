@@ -196,3 +196,25 @@ def test_runtime_trace_terminates_background_descendants_on_posix(
     assert runtime["status"] == "success"
     assert started.exists()
     assert not finished.exists()
+
+
+def test_child_report_loader_rejects_symlinks_and_hard_links(tmp_path: Path) -> None:
+    import pytest
+
+    from xray.runtime.session import _load_child_report
+
+    target = tmp_path / "target.json"
+    target.write_text('{"status":"success"}', encoding="utf-8")
+    symlink = tmp_path / "child-report-link.json"
+    try:
+        symlink.symlink_to(target)
+    except OSError:
+        pytest.skip("Symlinks are not available on this platform.")
+    assert _load_child_report(symlink) is None
+
+    hard_link = tmp_path / "child-report-hardlink.json"
+    try:
+        hard_link.hardlink_to(target)
+    except OSError:
+        pytest.skip("Hard links are not available on this platform.")
+    assert _load_child_report(hard_link) is None
