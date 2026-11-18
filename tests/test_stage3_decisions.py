@@ -52,10 +52,10 @@ def test_adr_redaction_uses_shared_api_token_and_bearer_patterns(tmp_path: Path)
     secret = "synthetic-api-token-value-123456"
     bearer = "Bearer synthetic-bearer-value-123456"
     adr.write_text(
-        "# Credential handling\\n\\n"
-        "## Context\\nAPI_TOKEN = \"" + secret + "\"\\n"
-        "## Decision\\nAuthorization: " + bearer + "\\n"
-        "## Consequences\\nValues must remain private.\\n",
+        "# Credential handling\n\n"
+        "## Context\nAPI_TOKEN = \"" + secret + "\"\n"
+        "## Decision\nAuthorization: " + bearer + "\n"
+        "## Consequences\nValues must remain private.\n",
         encoding="utf-8",
     )
     records, _summary = analyze_decisions(
