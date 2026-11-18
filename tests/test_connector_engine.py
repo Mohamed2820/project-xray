@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from xray.connectors.base import FileEntry
 from xray.connectors.filesystem import LocalFilesystemConnector
 from xray.core.engine import XRayEngine
 from xray.core.models import Node
@@ -67,3 +68,28 @@ def test_connector_enforces_entry_limit(tmp_path: Path) -> None:
     connector = LocalFilesystemConnector(tmp_path, max_entries=2)
     list(connector.iter_files())
     assert connector.limit_reached == "max_entries"
+
+
+def test_scanner_does_not_disclose_paths_from_untrusted_connector_entries(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    outside = tmp_path / "outside-secret-name.py"
+    outside.write_text("print('not scanned')\n", encoding="utf-8")
+
+    class UntrustedConnector:
+        @property
+        def root(self) -> Path:
+            return root
+
+        def iter_files(self):
+            yield FileEntry(outside, "../outside-secret-name.py", outside.stat().st_size)
+
+    report = ProjectScanner().scan(UntrustedConnector())
+
+    assert report.files == []
+    assert all(node.path != "../outside-secret-name.py" for node in report.nodes)
+    assert report.coverage["unsafe_connector_entries"] == 1
+    assert report.coverage["scan_complete"] is False
+    assert report.coverage["scan_limit_reached"] == "unsafe_or_changed_connector_entry"
