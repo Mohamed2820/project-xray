@@ -72,9 +72,17 @@ def test_taint_propagates_through_explicit_import_into_another_file(
     (project / "api" / "__init__.py").write_text("", encoding="utf-8")
     (project / "api" / "handlers.py").write_text(
         "from api.database import write_user\\n"
+        "import api.database\\n"
+        "import api.database as db\\n"
         "def update(request, cursor):\\n"
         "    user_id = request.args.get('id')\\n"
-        "    return write_user(cursor, user_id)\\n",
+        "    return write_user(cursor, user_id)\\n"
+        "def update_module(request, cursor):\\n"
+        "    user_id = request.args.get('module_id')\\n"
+        "    return api.database.write_user(cursor, user_id)\\n"
+        "def update_alias(request, cursor):\\n"
+        "    user_id = request.args.get('alias_id')\\n"
+        "    return db.write_user(cursor, user_id)\\n",
         encoding="utf-8",
     )
     (project / "api" / "database.py").write_text(
