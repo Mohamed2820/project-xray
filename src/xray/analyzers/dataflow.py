@@ -385,7 +385,6 @@ def analyze_data_flows(
         try:
             tree = ast.parse(source, filename=path)
         except (SyntaxError, RecursionError, ValueError):
-            skipped += 1
             continue
         trees[path] = tree
         indexed += 1
