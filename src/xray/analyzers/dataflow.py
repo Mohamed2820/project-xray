@@ -386,7 +386,7 @@ def analyze_data_flows(
     del trees
 
     module_paths: dict[str, str] = {}
-    for path, tree_names in functions.items():
+    for path in functions:
         module = Path(path).with_suffix("").as_posix().replace("/", ".")
         if module.endswith(".__init__"):
             module = module[: -len(".__init__")]
