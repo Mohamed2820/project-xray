@@ -5,6 +5,7 @@ import json
 import os
 import re
 import signal
+import stat
 import subprocess
 import sys
 import sysconfig
@@ -75,14 +76,38 @@ def _validate_output(root: Path, destination: Path) -> Path:
 
 
 def _load_child_report(path: Path) -> dict[str, Any] | None:
+    """Read the child report through one verified, no-follow file descriptor."""
+    descriptor: int | None = None
     try:
-        if path.is_symlink() or not path.is_file():
+        before = os.lstat(path)
+        if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
             return None
-        if path.stat().st_size > MAX_RUNTIME_REPORT_BYTES:
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags)
+        with os.fdopen(descriptor, "rb") as handle:
+            descriptor = None
+            metadata = os.fstat(handle.fileno())
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or stat.S_ISLNK(metadata.st_mode)
+                or metadata.st_nlink != 1
+                or metadata.st_size > MAX_RUNTIME_REPORT_BYTES
+                or (metadata.st_dev, metadata.st_ino)
+                != (before.st_dev, before.st_ino)
+            ):
+                return None
+            raw = handle.read(MAX_RUNTIME_REPORT_BYTES + 1)
+        if len(raw) > MAX_RUNTIME_REPORT_BYTES:
             return None
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+        value = json.loads(raw.decode("utf-8"))
+    except (
+        OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError
+    ):
         return None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
     return value if isinstance(value, dict) else None
 
 
