@@ -6,7 +6,7 @@ Project X-Ray statically inspects software projects, builds an evidence-backed c
 
 ## Current implementation
 
-Phases 1–4 provide:
+The first six implementation stages provide:
 
 - Read-only local filesystem inventory, symlink protection, and resource budgets.
 - Python file, class, function, import, and call-site analysis.
@@ -104,7 +104,7 @@ The dashboard listens on IPv4 loopback only (default 127.0.0.1:8765). It does no
 - Dependency transitive coverage depends on the ecosystem's available lockfile.
 - Dependency risk flags are metadata heuristics. A known advisory is reported only when an exact package/ecosystem/version matches the supplied offline OSV dataset.
 - Android declarations do not prove user grants or actual runtime use.
-- Data-flow tracing is heuristic and intra-function; it does not prove exploitability or model all sanitizers, aliases, dynamic behavior, or cross-file flows.
+- Data-flow tracing is a bounded Python AST heuristic. It follows explicitly imported local top-level functions across files, but does not fully resolve relative/dynamic imports, reflection, instance dispatch, broad aliasing, custom sanitizers, or runtime behavior; a reported path is not proof of exploitability.
 - Change analysis requires persisted snapshots and compares file hashes; it does not infer Git authors or commits.
 - ADR analysis only reports explicit Markdown records in recognized locations.
 - Runtime instrumentation currently observes Python only. Selected audit events are not an exhaustive OS monitor; native activity, child-process internals, and other language runtimes can be missed.
@@ -118,7 +118,7 @@ Third-party analyzer plugins require an exact trust allowlist and execute in-pro
 
     xray scan ./source --load-plugins --trusted-plugin reviewed-plugin-name
 
-See docs/runtime-monitoring.md, docs/security-hardening.md, docs/architecture.md, and docs/plugins.md.
+See docs/runtime-monitoring.md, docs/security-hardening.md, docs/architecture.md, and docs/plugins.md. The first-version acceptance checklist and release procedure are in [docs/release-acceptance.md](docs/release-acceptance.md).
 
 
 ## Phase 6: controlled real-project benchmark
@@ -149,3 +149,8 @@ deployment security still requires environment-specific penetration testing.
 ## License
 
 MIT. See LICENSE.
+
+
+## Release acceptance
+
+The first-version acceptance criteria are tracked and tested in [docs/release-acceptance.md](docs/release-acceptance.md). A criterion is considered verified only when its implementation evidence and the corresponding CI checks pass; the checklist does not imply production security certification.
