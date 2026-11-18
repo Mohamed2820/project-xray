@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -21,6 +22,35 @@ from xray.storage.sqlite import SQLiteDataEngine
 
 MAX_RUNTIME_REPORT_BYTES = 20 * 1024 * 1024
 BOOTSTRAP = "from xray.runtime.runner import main; raise SystemExit(main())"
+_SENSITIVE_ENV_NAME = re.compile(
+    r"(?:^|[_-])(?:TOKEN|SECRET|PASSWORD|PASSWD|API[_-]?KEY|ACCESS[_-]?KEY|"
+    r"CREDENTIALS?|AUTHORIZATION|COOKIE|PRIVATE[_-]?KEY)(?:$|[_-])",
+    re.IGNORECASE,
+)
+_UNSAFE_PYTHON_ENV = frozenset({
+    "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONINSPECT",
+    "PYTHONUSERBASE", "LD_PRELOAD", "LD_LIBRARY_PATH",
+    "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH",
+    "DYLD_FRAMEWORK_PATH", "DYLD_FALLBACK_LIBRARY_PATH",
+})
+
+
+def _runtime_environment() -> tuple[dict[str, str], int]:
+    """Remove common credential variables and Python/native loader injection knobs."""
+    filtered: dict[str, str] = {}
+    removed_secrets = 0
+    for key, value in os.environ.items():
+        normalized = key.upper()
+        if normalized in _UNSAFE_PYTHON_ENV:
+            continue
+        if _SENSITIVE_ENV_NAME.search(key):
+            removed_secrets += 1
+            continue
+        filtered[key] = value
+    filtered["PYTHONDONTWRITEBYTECODE"] = "1"
+    filtered["PYTHONNOUSERSITE"] = "1"
+    filtered["XRAY_RUNTIME_ENV_FILTERED"] = "1"
+    return filtered, removed_secrets
 
 
 def _validate_output(root: Path, destination: Path) -> Path:
@@ -310,6 +340,10 @@ def run_python_trace(
             "sandboxed": False,
             "code_execution": True,
             "network_access_restricted": False,
+            "environment_filtered": True,
+            "sensitive_environment_variables_removed": (
+                removed_sensitive_environment_variables
+            ),
             "arguments_captured": False,
             "environment_captured": False,
             "stdout_stderr_captured": False,
