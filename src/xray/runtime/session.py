@@ -7,6 +7,7 @@ import re
 import signal
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 import uuid
@@ -23,15 +24,16 @@ from xray.storage.sqlite import SQLiteDataEngine
 MAX_RUNTIME_REPORT_BYTES = 20 * 1024 * 1024
 BOOTSTRAP = "from xray.runtime.runner import main; raise SystemExit(main())"
 _SENSITIVE_ENV_NAME = re.compile(
-    r"(?:^|[_-])(?:TOKEN|SECRET|PASSWORD|PASSWD|API[_-]?KEY|ACCESS[_-]?KEY|"
-    r"CREDENTIALS?|AUTHORIZATION|COOKIE|PRIVATE[_-]?KEY)(?:$|[_-])",
+    r"(?:^|[_-])(?:TOKEN|SECRET|PASSWORD|PASSWD|API[_-]?(?:KEY|TOKEN)|"
+    r"ACCESS[_-]?KEY|CREDENTIALS?|AUTHORIZATION|COOKIE|PRIVATE[_-]?KEY|"
+    r"DATABASE[_-]?(?:URL|URI|DSN)|CONNECTION[_-]?STRING|DSN)(?:$|[_-])",
     re.IGNORECASE,
 )
 _UNSAFE_PYTHON_ENV = frozenset({
     "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONINSPECT",
-    "PYTHONUSERBASE", "LD_PRELOAD", "LD_LIBRARY_PATH",
-    "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH",
-    "DYLD_FRAMEWORK_PATH", "DYLD_FALLBACK_LIBRARY_PATH",
+    "PYTHONUSERBASE", "PYTHONBREAKPOINT", "LD_PRELOAD", "LD_AUDIT",
+    "DYLD_INSERT_LIBRARIES", "DYLD_FRAMEWORK_PATH",
+    "DYLD_FALLBACK_FRAMEWORK_PATH", "DYLD_FALLBACK_LIBRARY_PATH",
 })
 
 
@@ -47,8 +49,15 @@ def _runtime_environment() -> tuple[dict[str, str], int]:
             removed_secrets += 1
             continue
         filtered[key] = value
+    # setup-python and some relocatable interpreters rely on the configured
+    # Python library directory. Never inherit a caller-controlled loader path.
+    library_dir = sysconfig.get_config_var("LIBDIR")
+    if isinstance(library_dir, str) and Path(library_dir).is_dir():
+        loader_key = "DYLD_LIBRARY_PATH" if sys.platform == "darwin" else "LD_LIBRARY_PATH"
+        filtered[loader_key] = library_dir
     filtered["PYTHONDONTWRITEBYTECODE"] = "1"
     filtered["PYTHONNOUSERSITE"] = "1"
+    filtered["PYTHONSAFEPATH"] = "1"
     filtered["XRAY_RUNTIME_ENV_FILTERED"] = "1"
     return filtered, removed_secrets
 
