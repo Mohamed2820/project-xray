@@ -149,3 +149,44 @@ def test_editable_vcs_requirement_is_identified_and_url_redacted(tmp_path: Path)
     assert "external_or_git_source" in items[0]["risk_flags"]
     assert "private-password" not in repr(items)
     assert "user:private-password" not in repr(items)
+
+
+def test_osv_matching_stops_at_expired_deadline(tmp_path: Path) -> None:
+    import time
+
+    from xray.analyzers.dependencies import _load_osv_exact_matches
+
+    osv = tmp_path / "osv.json"
+    osv.write_text(
+        json.dumps({
+            "vulns": [{
+                "id": "XRAY-TEST-1",
+                "affected": [{
+                    "package": {"ecosystem": "PyPI", "name": "sample"},
+                    "versions": ["1.0"],
+                }],
+            }],
+        }),
+        encoding="utf-8",
+    )
+    matches, complete = _load_osv_exact_matches(
+        osv, 1_000_000, deadline=time.monotonic() - 1
+    )
+
+    assert matches == {}
+    assert complete is False
+
+
+def test_dependency_analysis_reports_expired_scan_budget(tmp_path: Path) -> None:
+    import time
+
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\\ndependencies = ["sample==1.0"]\\n',
+        encoding="utf-8",
+    )
+    _items, _nodes, _edges, _findings, summary = analyze_dependencies(
+        tmp_path, deadline=time.monotonic() - 1
+    )
+
+    assert summary["status"] == "partial"
+    assert summary["deadline_reached"] is True
