@@ -62,3 +62,18 @@ Credential-like content is redacted before records are persisted.
 ## 7. Extending language support
 
 New runtime observers implement RuntimeAdapter and declare their language and file extensions. An adapter must define its own event model, resource limits, execution isolation, redaction policy, timeline semantics, and coverage limitations. Python is the only built-in runtime adapter at this stage.
+
+
+## Runtime child environment filtering
+
+Before starting the explicitly requested Python child, X-Ray removes environment
+variables whose names look like credentials (tokens, passwords, secrets, API/access
+keys, credentials, authorization values, cookies, or private keys). It also removes
+Python startup/path injection variables and common native loader injection variables,
+and disables user-site imports and bytecode writes for the child.
+
+This is a defense-in-depth measure, not an operating-system sandbox. The child still
+runs as the same OS user, can read files available to that user, and can access the
+network. Do not run untrusted code on a machine containing valuable credentials; use a
+separate OS account or an externally enforced container/VM with network and filesystem
+restrictions for that threat model.
