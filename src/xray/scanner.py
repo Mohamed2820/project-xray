@@ -223,9 +223,12 @@ class ProjectScanner:
         # max_file_bytes. These analyzers only read data; they never install or run it.
         dependency_records, dependency_nodes, dependency_edges, dependency_findings, dep_summary = (
             analyze_dependencies(
-                connector.root, self.max_file_bytes, self.osv_database
+                connector.root, self.max_file_bytes, self.osv_database,
+                deadline=deadline,
             )
         )
+        if dep_summary.get("status") == "partial" and not limit_reason:
+            limit_reason = "dependency_analysis_budget"
         known_file_ids = {
             node.id for node in report.nodes if node.kind == "file"
         }
