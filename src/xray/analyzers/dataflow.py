@@ -377,7 +377,6 @@ def analyze_data_flows(
             break
         source = read_project_text(root, path, max_bytes)
         if source is None:
-            skipped += 1
             continue
         source_bytes = len(source.encode("utf-8"))
         if indexed_source_bytes + source_bytes > max_index_source_bytes:
@@ -569,7 +568,8 @@ def analyze_data_flows(
         "interprocedural_flow_count": sum(bool(item.get("cross_file")) for item in flows),
         "max_python_files": max_python_files,
         "max_interprocedural_depth": MAX_INTERPROCEDURAL_DEPTH,
-        "model": "bounded_local_interprocedural_ast_taint_heuristic",
+        "model": "intra_function_ast_taint_heuristic",
+        "interprocedural_model": "bounded_local_interprocedural_ast_taint_heuristic",
         "limitations": [
             "Cross-file resolution is limited to statically indexed top-level Python functions "
             "and explicit absolute imports; relative/dynamic imports and instance-method "
