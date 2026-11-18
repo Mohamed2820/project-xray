@@ -390,24 +390,24 @@ def _load_osv_exact_matches(
     deadline: float | None = None,
 ) -> tuple[dict[tuple[str, str, str], list[str]], bool]:
     if path is None:
-        return {}, True
+        return {}, True, True
     try:
         candidate = path.expanduser()
         if candidate.is_symlink():
-            return {}
+            return {}, True
         metadata = candidate.stat()
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_OSV_BYTES:
-            return {}
+            return {}, True
         flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
         flags |= getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(candidate, flags)
         with os.fdopen(descriptor, "rb") as handle:
             raw = handle.read(MAX_OSV_BYTES + 1)
         if len(raw) > MAX_OSV_BYTES:
-            return {}
+            return {}, True
         data = json.loads(raw.decode("utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError):
-        return {}
+        return {}, True
     matches: dict[tuple[str, str, str], list[str]] = {}
     vulnerabilities = data.get("vulns", []) if isinstance(data, dict) else []
     if not isinstance(vulnerabilities, list):
