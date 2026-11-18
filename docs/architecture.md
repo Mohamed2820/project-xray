@@ -10,7 +10,7 @@
 | Language Analyzers | Convert source into typed graph elements | Python AST built in; static dependency/config analyzers |
 | Dependency Intelligence | Direct/transitive inventory and advisory risk signals | Manifest/lockfile parsing plus optional offline exact-match OSV dataset |
 | Permission Analysis | Inspect declared platform and workflow/deployment privileges | Android Manifest, GitHub Actions, Dockerfile, and selected YAML checks |
-| Data Lineage | Candidate taint paths from sources to sensitive sinks | Intra-function Python AST heuristic |
+| Data Lineage | Candidate taint paths from sources to sensitive sinks | Bounded Python AST heuristic; follows explicitly imported local top-level functions across files |
 | Change Intelligence | Compare additions/modifications/deletions and structural impact | SHA-256 comparison between persisted snapshots |
 | Decision Intelligence | Inventory explicit ADRs and completeness | Recognized Markdown ADR paths |
 | Runtime Adapter | Capture language-specific calls, events, and errors | Python adapter; protocol supports future adapters |
