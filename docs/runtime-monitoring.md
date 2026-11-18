@@ -69,8 +69,9 @@ New runtime observers implement RuntimeAdapter and declare their language and fi
 Before starting the explicitly requested Python child, X-Ray removes environment
 variables whose names look like credentials (tokens, passwords, secrets, API/access
 keys, credentials, authorization values, cookies, or private keys). It also removes
-Python startup/path injection variables and common native loader injection variables,
-and disables user-site imports and bytecode writes for the child.
+Python startup/path injection variables and native loader injection hooks. A loader
+search path is rebuilt from the configured Python library directory rather than
+inherited from the caller. User-site imports and bytecode writes are disabled for the child.
 
 This is a defense-in-depth measure, not an operating-system sandbox. The child still
 runs as the same OS user, can read files available to that user, and can access the
