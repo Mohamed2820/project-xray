@@ -41,3 +41,29 @@ def test_adr_scan_is_bounded(tmp_path: Path) -> None:
     )
     assert len(records) == 2
     assert summary["status"] == "partial"
+
+
+def test_adr_redaction_uses_shared_api_token_and_bearer_patterns(tmp_path: Path) -> None:
+    from xray.analyzers.decisions import analyze_decisions
+
+    project = tmp_path / "project"
+    adr = project / "docs" / "adr" / "ADR-004.md"
+    adr.parent.mkdir(parents=True)
+    secret = "synthetic-api-token-value-123456"
+    bearer = "Bearer synthetic-bearer-value-123456"
+    adr.write_text(
+        "# Credential handling\\n\\n"
+        "## Context\\nAPI_TOKEN = \"" + secret + "\"\\n"
+        "## Decision\\nAuthorization: " + bearer + "\\n"
+        "## Consequences\\nValues must remain private.\\n",
+        encoding="utf-8",
+    )
+    records, _summary = analyze_decisions(
+        project,
+        [{"path": "docs/adr/ADR-004.md", "status": "analyzed"}],
+    )
+
+    rendered = repr(records)
+    assert "[REDACTED]" in rendered or "[REDACTED_TOKEN]" in rendered
+    assert secret not in rendered
+    assert bearer not in rendered
