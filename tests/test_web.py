@@ -69,6 +69,11 @@ def test_dashboard_serves_arabic_html_and_report_history(tmp_path: Path) -> None
     assert 'lang="ar" dir="rtl"' in html
     assert headers["X-Content-Type-Options"] == "nosniff"
     assert "default-src 'self'" in headers["Content-Security-Policy"]
+    policy = headers["Content-Security-Policy"]
+    assert "script-src 'self'" in policy
+    assert "unsafe-inline" not in policy.split("script-src", 1)[1].split(";", 1)[0]
+    assert '<script src="/app.js" defer></script>' in html
+    assert "<script>" not in html
     assert "innerHTML" not in html
     assert "eval(" not in html
     assert "<script src=\"https://" not in html
@@ -180,3 +185,18 @@ def test_dashboard_history_text_fields_are_bounded(tmp_path: Path) -> None:
     assert len(payload["repairs"][0]["summary"]) <= 4000
     assert len(payload["tests"][0]["command"]) <= 2000
     assert len(payload["tests"][0]["summary"]) <= 4000
+
+
+def test_dashboard_serves_same_origin_javascript_with_strict_script_csp(
+    tmp_path: Path,
+) -> None:
+    project, database, _report = _history_fixture(tmp_path)
+    server = create_dashboard_server(database_path=database, project_root=project, port=0)
+    status, headers, body = _request(server, "/app.js")
+
+    assert status == 200
+    assert "javascript" in headers["Content-Type"]
+    assert b'"use strict"' in body
+    policy = headers["Content-Security-Policy"]
+    assert "script-src 'self'" in policy
+    assert "script-src 'self' 'unsafe-inline'" not in policy
