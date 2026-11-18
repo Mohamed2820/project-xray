@@ -5,6 +5,7 @@ import json
 import os
 import re
 import stat
+import time
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ from xray.core.models import Edge, Evidence, Finding, Node
 
 MAX_DEPENDENCIES = 10_000
 MAX_OSV_BYTES = 50 * 1024 * 1024
+MAX_OSV_VERSION_RECORDS = 250_000
 
 
 def _redact_source(source: str) -> str:
@@ -382,10 +384,13 @@ def _lock_dependencies(
 
 
 def _load_osv_exact_matches(
-    path: Path | None, max_bytes: int
-) -> dict[tuple[str, str, str], list[str]]:
+    path: Path | None,
+    max_bytes: int,
+    *,
+    deadline: float | None = None,
+) -> tuple[dict[tuple[str, str, str], list[str]], bool]:
     if path is None:
-        return {}
+        return {}, True
     try:
         candidate = path.expanduser()
         if candidate.is_symlink():
@@ -406,8 +411,13 @@ def _load_osv_exact_matches(
     matches: dict[tuple[str, str, str], list[str]] = {}
     vulnerabilities = data.get("vulns", []) if isinstance(data, dict) else []
     if not isinstance(vulnerabilities, list):
-        return matches
+        return matches, True
+    processed_versions = 0
+    complete = True
     for vulnerability in vulnerabilities[:100_000]:
+        if deadline is not None and time.monotonic() >= deadline:
+            complete = False
+            break
         if not isinstance(vulnerability, dict):
             continue
         vulnerability_id = vulnerability.get("id")
@@ -421,6 +431,9 @@ def _load_osv_exact_matches(
         if not isinstance(affected_items, list):
             continue
         for affected in affected_items[:1000]:
+            if deadline is not None and time.monotonic() >= deadline:
+                complete = False
+                break
             if not isinstance(affected, dict):
                 continue
             package = affected.get("package", {})
@@ -432,20 +445,51 @@ def _load_osv_exact_matches(
             if not isinstance(versions, list):
                 continue
             for version in versions[:10_000]:
+                if (
+                    processed_versions >= MAX_OSV_VERSION_RECORDS
+                    or (deadline is not None and time.monotonic() >= deadline)
+                ):
+                    complete = False
+                    break
+                processed_versions += 1
                 matches.setdefault((ecosystem.lower(), name, str(version)), []).append(
                     vulnerability_id
                 )
-    return matches
+            if not complete:
+                break
+        if not complete:
+            break
+    return matches, complete
 
 
 def analyze_dependencies(
     root: Path,
     max_bytes: int = 1_000_000,
     osv_database: Path | None = None,
+    *,
+    deadline: float | None = None,
 ) -> tuple[list[dict[str, Any]], list[Node], list[Edge], list[Finding], dict[str, Any]]:
-    """Inventory direct/transitive dependencies; never install or contact registries."""
+    """Inventory direct/transitive dependencies within the shared scan time budget."""
+    if deadline is not None and time.monotonic() >= deadline:
+        return [], [], [], [], {
+            "status": "partial", "dependency_count": 0,
+            "direct_count": 0, "transitive_count": 0, "ecosystems": [],
+            "offline_advisory_database": osv_database is not None,
+            "advisory_matches": 0, "max_dependencies": MAX_DEPENDENCIES,
+            "network_access": False, "deadline_reached": True,
+            "limitations": ["Dependency analysis was skipped because the scan time budget expired."],
+        }
     manifests = _python_manifest(root, max_bytes)
     entries = _lock_dependencies(root, max_bytes, manifests)
+    if deadline is not None and time.monotonic() >= deadline:
+        return [], [], [], [], {
+            "status": "partial", "dependency_count": 0,
+            "direct_count": 0, "transitive_count": 0, "ecosystems": [],
+            "offline_advisory_database": osv_database is not None,
+            "advisory_matches": 0, "max_dependencies": MAX_DEPENDENCIES,
+            "network_access": False, "deadline_reached": True,
+            "limitations": ["Dependency metadata parsing reached the scan time budget."],
+        }
     # Merge direct manifest constraints into resolved lock entries instead of
     # reporting each package twice (once requested and once locked).
     manifest_items = manifests + [
@@ -477,13 +521,19 @@ def analyze_dependencies(
                 "direct": "true",
             })
 
-    advisory_map = _load_osv_exact_matches(osv_database, max_bytes)
+    advisory_map, advisory_complete = _load_osv_exact_matches(
+        osv_database, max_bytes, deadline=deadline
+    )
     output: list[dict[str, Any]] = []
     nodes: list[Node] = []
     edges: list[Edge] = []
     findings: list[Finding] = []
     seen: set[tuple[str, str, str, str]] = set()
+    dependency_deadline_reached = False
     for item in entries[:MAX_DEPENDENCIES]:
+        if deadline is not None and time.monotonic() >= deadline:
+            dependency_deadline_reached = True
+            break
         ecosystem = str(item.get("ecosystem", "unknown"))
         name = str(item.get("name", ""))
         version = str(item.get("version", ""))
@@ -548,7 +598,10 @@ def analyze_dependencies(
                 Evidence(source_path, None, f"{ecosystem}:{name}"),
             ))
     summary = {
-        "status": "analyzed",
+        "status": (
+            "partial" if not advisory_complete or dependency_deadline_reached
+            else "analyzed"
+        ),
         "dependency_count": len(output),
         "direct_count": sum(item["direct"] for item in output),
         "transitive_count": sum(not item["direct"] for item in output),
@@ -557,6 +610,9 @@ def analyze_dependencies(
         "advisory_matches": sum(bool(item["advisory_ids"]) for item in output),
         "max_dependencies": MAX_DEPENDENCIES,
         "network_access": False,
+        "deadline_reached": dependency_deadline_reached or not advisory_complete,
+        "osv_dataset_complete": advisory_complete,
+        "max_osv_version_records": MAX_OSV_VERSION_RECORDS,
         "limitations": [
             "Dependency metadata is static and lockfile-dependent.",
             "Indirect relationships may be incomplete when an ecosystem lockfile is absent.",
