@@ -7,6 +7,7 @@ import os
 import re
 import sqlite3
 import stat
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,9 @@ from urllib.parse import quote, urlsplit
 
 MAX_REPORT_BYTES = 64 * 1024 * 1024
 MAX_RUNTIME_REPORT_BYTES = 20 * 1024 * 1024
+MAX_HISTORY_TEXT_BYTES = 4096
+MAX_HISTORY_ITEMS = 100
+MAX_DASHBOARD_THREADS = 16
 SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 HTML_FILE = Path(__file__).with_name("index.html")
 
@@ -102,7 +106,10 @@ class DashboardData:
         try:
             if not self._has_table(connection, "scans"):
                 return None
-            query = "SELECT report_json FROM scans WHERE length(report_json) <= ?"
+            query = (
+                "SELECT report_json FROM scans "
+                "WHERE length(CAST(report_json AS BLOB)) <= ?"
+            )
             params: tuple[Any, ...] = (MAX_REPORT_BYTES,)
             if self.project_root is not None:
                 query += " AND root = ?"
@@ -155,26 +162,45 @@ class DashboardData:
         specs = {
             "scans": (
                 "scans",
-                "scan_id, root, created_at, schema_version, file_count, "
-                "node_count, edge_count, finding_count",
+                "substr(scan_id, 1, 128) AS scan_id, "
+                "substr(root, 1, 2048) AS root, "
+                "substr(created_at, 1, 64) AS created_at, "
+                "substr(schema_version, 1, 32) AS schema_version, "
+                "file_count, node_count, edge_count, finding_count",
                 "created_at",
             ),
             "runtimes": (
                 "runtime_sessions",
-                "session_id, root, script, started_at, finished_at, "
-                "status, exit_code, error_type",
+                "substr(session_id, 1, 128) AS session_id, "
+                "substr(root, 1, 2048) AS root, "
+                "substr(script, 1, 512) AS script, "
+                "substr(started_at, 1, 64) AS started_at, "
+                "substr(finished_at, 1, 64) AS finished_at, "
+                "substr(status, 1, 32) AS status, exit_code, "
+                "substr(error_type, 1, 128) AS error_type",
                 "started_at",
             ),
             "repairs": (
                 "repair_attempts",
-                "repair_id, root, session_id, created_at, summary, "
-                "outcome, changed_files_json",
+                "substr(repair_id, 1, 128) AS repair_id, "
+                "substr(root, 1, 2048) AS root, "
+                "substr(session_id, 1, 128) AS session_id, "
+                "substr(created_at, 1, 64) AS created_at, "
+                "substr(summary, 1, 4000) AS summary, "
+                "substr(outcome, 1, 32) AS outcome, "
+                "CASE WHEN length(CAST(changed_files_json AS BLOB)) <= 262144 "
+                "THEN changed_files_json ELSE '[]' END AS changed_files_json",
                 "created_at",
             ),
             "tests": (
                 "test_runs",
-                "test_run_id, root, repair_id, session_id, created_at, "
-                "command, exit_code, passed, summary",
+                "substr(test_run_id, 1, 128) AS test_run_id, "
+                "substr(root, 1, 2048) AS root, "
+                "substr(repair_id, 1, 128) AS repair_id, "
+                "substr(session_id, 1, 128) AS session_id, "
+                "substr(created_at, 1, 64) AS created_at, "
+                "substr(command, 1, 2000) AS command, "
+                "exit_code, passed, substr(summary, 1, 4000) AS summary",
                 "created_at",
             ),
         }
@@ -188,13 +214,19 @@ class DashboardData:
                 if self.project_root is not None:
                     query += " WHERE root = ?"
                     params = (str(self.project_root),)
-                query += " ORDER BY " + order_column + " DESC LIMIT 100"
+                query += " ORDER BY " + order_column + " DESC LIMIT ?"
+                params += (MAX_HISTORY_ITEMS,)
                 result[key] = [dict(row) for row in connection.execute(query, params)]
                 if key == "repairs":
                     for item in result[key]:
                         try:
-                            item["changed_files"] = json.loads(item.pop("changed_files_json"))
-                        except (json.JSONDecodeError, TypeError):
+                            parsed = json.loads(item.pop("changed_files_json"))
+                            item["changed_files"] = (
+                                [value[:512] for value in parsed[:500]
+                                 if isinstance(value, str)]
+                                if isinstance(parsed, list) else []
+                            )
+                        except (json.JSONDecodeError, TypeError, RecursionError):
                             item["changed_files"] = []
             return result
         finally:
@@ -211,7 +243,8 @@ class DashboardData:
                 return None
             query = (
                 "SELECT report_json FROM runtime_sessions "
-                "WHERE session_id = ? AND length(report_json) <= ?"
+                "WHERE session_id = ? "
+                "AND length(CAST(report_json AS BLOB)) <= ?"
             )
             params: tuple[Any, ...] = (session_id, MAX_RUNTIME_REPORT_BYTES)
             if self.project_root is not None:
@@ -248,6 +281,11 @@ def create_dashboard_server(*, report_path: Path | None = None,
     class Handler(BaseHTTPRequestHandler):
         server_version = "ProjectXRayDashboard"
         sys_version = ""
+        protocol_version = "HTTP/1.0"
+
+        def setup(self) -> None:
+            super().setup()
+            self.connection.settimeout(5.0)
 
         def log_message(self, _format: str, *args: Any) -> None:
             return
@@ -275,7 +313,13 @@ def create_dashboard_server(*, report_path: Path | None = None,
             self.wfile.write(body)
 
         def _json(self, status: int, value: Any) -> None:
-            body = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            try:
+                body = json.dumps(
+                    value, ensure_ascii=False, separators=(",", ":")
+                ).encode("utf-8")
+            except (TypeError, ValueError, RecursionError):
+                status = 500
+                body = b'{"error":"Dashboard response could not be serialized."}'
             self._send(status, body, "application/json; charset=utf-8")
 
         def _deny_method(self) -> None:
@@ -337,9 +381,31 @@ def create_dashboard_server(*, report_path: Path | None = None,
         def do_DELETE(self) -> None:
             self._deny_method()
 
-    server_instance = ThreadingHTTPServer((str(address), port), Handler)
-    server_instance.daemon_threads = True
-    return server_instance
+    class BoundedThreadingHTTPServer(ThreadingHTTPServer):
+        request_queue_size = 16
+        daemon_threads = True
+
+        def __init__(self, server_address: tuple[str, int], request_handler: Any) -> None:
+            self._request_slots = threading.BoundedSemaphore(MAX_DASHBOARD_THREADS)
+            super().__init__(server_address, request_handler)
+
+        def process_request(self, request: Any, client_address: Any) -> None:
+            if not self._request_slots.acquire(blocking=False):
+                self.shutdown_request(request)
+                return
+            try:
+                super().process_request(request, client_address)
+            except BaseException:
+                self._request_slots.release()
+                raise
+
+        def process_request_thread(self, request: Any, client_address: Any) -> None:
+            try:
+                super().process_request_thread(request, client_address)
+            finally:
+                self._request_slots.release()
+
+    return BoundedThreadingHTTPServer((str(address), port), Handler)
 
 
 def serve_dashboard(*, report_path: Path | None = None,
