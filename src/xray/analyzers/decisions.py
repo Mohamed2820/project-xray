@@ -10,6 +10,7 @@ from typing import Any
 from xray.analyzers.safe_io import read_project_text
 from xray.analyzers.secrets import redact_sensitive_text
 
+
 def _redact(text: str) -> str:
     """Use the shared credential redactor so analyzer output cannot diverge."""
     return redact_sensitive_text(text)
