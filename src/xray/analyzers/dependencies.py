@@ -390,7 +390,7 @@ def _load_osv_exact_matches(
     deadline: float | None = None,
 ) -> tuple[dict[tuple[str, str, str], list[str]], bool]:
     if path is None:
-        return {}, True, True
+        return {}, True
     try:
         candidate = path.expanduser()
         if candidate.is_symlink():
@@ -477,7 +477,9 @@ def analyze_dependencies(
             "offline_advisory_database": osv_database is not None,
             "advisory_matches": 0, "max_dependencies": MAX_DEPENDENCIES,
             "network_access": False, "deadline_reached": True,
-            "limitations": ["Dependency analysis was skipped because the scan time budget expired."],
+            "limitations": [
+                "Dependency analysis was skipped because the scan time budget expired."
+            ],
         }
     manifests = _python_manifest(root, max_bytes)
     entries = _lock_dependencies(root, max_bytes, manifests)
