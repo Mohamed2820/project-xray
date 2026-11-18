@@ -130,12 +130,12 @@ def test_runtime_child_does_not_inherit_sensitive_environment_variables(
     monkeypatch.setenv("PYTHONPATH", str(tmp_path / "untrusted-pythonpath"))
     script = project / "main.py"
     script.write_text(
-        "import os\\n"
-        "from pathlib import Path\\n"
+        "import os\n"
+        "from pathlib import Path\n"
         f"Path({str(marker)!r}).write_text('|' .join(["
         "os.getenv('XRAY_AUDIT_TEST_API_TOKEN', 'missing'), "
         "os.getenv('XRAY_AUDIT_TEST_PASSWORD', 'missing'), "
-        "os.getenv('PYTHONPATH', 'missing')]))\\n",
+        "os.getenv('PYTHONPATH', 'missing')]))\n",
         encoding="utf-8",
     )
     report = XRayEngine().scan(project)
