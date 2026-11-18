@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from xray.analyzers.safe_io import read_project_bytes, read_project_text
 
 
