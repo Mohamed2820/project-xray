@@ -181,7 +181,7 @@ def test_dependency_analysis_reports_expired_scan_budget(tmp_path: Path) -> None
     import time
 
     (tmp_path / "pyproject.toml").write_text(
-        '[project]\\ndependencies = ["sample==1.0"]\\n',
+        '[project]\ndependencies = ["sample==1.0"]\n',
         encoding="utf-8",
     )
     _items, _nodes, _edges, _findings, summary = analyze_dependencies(
